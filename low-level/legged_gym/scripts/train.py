@@ -32,6 +32,7 @@ import numpy as np
 import os
 from datetime import datetime
 import isaacgym
+import torch.distributed as dist
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from legged_gym.envs import *
@@ -39,7 +40,29 @@ from legged_gym.utils import get_args, task_registry
 import torch
 import wandb
 
+def setup_distributed(args):
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    distributed = world_size > 1
+
+    args.distributed = distributed
+    args.world_size = world_size
+    args.rank = rank
+    args.local_rank = local_rank
+
+    if distributed:
+        if not torch.cuda.is_available():
+            raise RuntimeError("Distributed training requires CUDA, but CUDA is not available")
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend="nccl", init_method="env://")
+        args.rl_device = f"cuda:{local_rank}"
+        args.sim_device_id = local_rank
+        args.sim_device = f"cuda:{local_rank}"
+    return args
+
 def train(args):
+    args = setup_distributed(args)
     log_pth = LEGGED_GYM_ROOT_DIR + "/logs/{}/".format(args.proj_name) + args.exptid
     try:
         os.makedirs(log_pth)
@@ -52,13 +75,20 @@ def train(args):
         args.num_envs = 128
     else:
         mode = "online"
+    if args.rank != 0:
+        mode = "disabled"
     wandb.init(project=args.proj_name, name=args.exptid, mode=mode, dir=LEGGED_GYM_ENVS_DIR +"/logs")
-    wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/b1z1_config.py", policy="now")
-    wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
+    if args.rank == 0:
+        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/b1z1_config.py", policy="now")
+        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
 
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     ppo_runner, train_cfg, _ = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args)
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
+    wandb.finish()
+    if args.distributed and dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 
 if __name__ == '__main__':
     args = get_args()

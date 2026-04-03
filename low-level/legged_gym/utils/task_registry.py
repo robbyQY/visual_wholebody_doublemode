@@ -95,6 +95,15 @@ class TaskRegistry():
             env_cfg, _ = self.get_cfgs(name)
         # override cfg from args (if specified)
         env_cfg, _ = update_cfg_from_args(env_cfg, None, args)
+        world_size = getattr(args, "world_size", 1)
+        if world_size > 1:
+            if env_cfg.env.num_envs < world_size:
+                raise ValueError(f"num_envs ({env_cfg.env.num_envs}) must be >= world_size ({world_size})")
+            if env_cfg.env.num_envs % world_size != 0:
+                raise ValueError(f"num_envs ({env_cfg.env.num_envs}) must be divisible by world_size ({world_size}) for distributed training")
+            env_cfg.env.num_envs //= world_size
+        distributed_rank = getattr(args, "rank", 0)
+        env_cfg.seed += distributed_rank
         set_seed(env_cfg.seed)
         # parse sim params (convert to dict first)
         sim_params = {"sim": class_to_dict(env_cfg.sim)}

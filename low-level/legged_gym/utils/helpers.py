@@ -30,6 +30,7 @@
 
 import os
 import copy
+import sys
 import torch
 import numpy as np
 import random
@@ -165,6 +166,20 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
     return env_cfg, cfg_train
 
 def get_args(test=False):
+    filtered_argv = [sys.argv[0]]
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--local_rank", "--local-rank"):
+            skip_next = True
+            continue
+        if arg.startswith("--local_rank=") or arg.startswith("--local-rank="):
+            continue
+        filtered_argv.append(arg)
+    sys.argv = filtered_argv
+
     custom_parameters = [
         {"name": "--task", "type": str, "default": "widowGo1", "help": "Resume training or start testing from a checkpoint. Overrides config file if provided."},
         {"name": "--resume", "action": "store_true", "default": False,  "help": "Resume training from a checkpoint"},

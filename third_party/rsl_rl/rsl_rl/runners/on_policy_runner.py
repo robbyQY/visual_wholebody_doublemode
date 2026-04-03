@@ -35,6 +35,7 @@ import statistics
 
 # from torch.utils.tensorboard import SummaryWriter
 import torch
+import torch.distributed as dist
 
 from rsl_rl.algorithms import PPO
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
@@ -56,6 +57,10 @@ class OnPolicyRunner:
         self.policy_cfg = train_cfg["policy"]
         self.device = device
         self.env = env
+        self.distributed = dist.is_available() and dist.is_initialized()
+        self.rank = dist.get_rank() if self.distributed else 0
+        self.world_size = dist.get_world_size() if self.distributed else 1
+        self.is_main_process = self.rank == 0
         if self.env.num_privileged_obs is not None:
             num_critic_obs = self.env.num_privileged_obs 
         else:
@@ -73,10 +78,12 @@ class OnPolicyRunner:
         self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
-        summary(self.alg.actor_critic)
+        if self.is_main_process:
+            summary(self.alg.actor_critic)
 
         # init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions])
+        self.alg.setup_distributed()
 
         # Log
         self.log_dir = log_dir
@@ -173,14 +180,15 @@ class OnPolicyRunner:
             
             stop = time.time()
             learn_time = stop - start
-            if self.log_dir is not None:
+            if self.log_dir is not None and self.is_main_process:
                 self.log(locals())
-            if it % self.save_interval == 0:
+            if self.is_main_process and it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)), it)
             ep_infos.clear()
         
         self.current_learning_iteration += num_learning_iterations
-        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)), self.current_learning_iteration)
+        if self.is_main_process:
+            self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)), self.current_learning_iteration)
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs

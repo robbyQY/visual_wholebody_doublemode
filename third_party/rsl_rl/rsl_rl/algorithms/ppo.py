@@ -32,6 +32,7 @@ from time import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 
 from rsl_rl.modules import ActorCritic
 from rsl_rl.storage import RolloutStorage
@@ -102,6 +103,37 @@ class PPO:
             self.arm_fk = self.arm_fk_adaptive_gains
         else:
             self.arm_fk = self.arm_fk_fixed_gains
+        self.distributed = False
+        self.rank = 0
+        self.world_size = 1
+
+    def setup_distributed(self):
+        self.distributed = dist.is_available() and dist.is_initialized()
+        if not self.distributed:
+            return
+        self.rank = dist.get_rank()
+        self.world_size = dist.get_world_size()
+        for parameter in self.actor_critic.parameters():
+            dist.broadcast(parameter.data, src=0)
+        for buffer in self.actor_critic.buffers():
+            dist.broadcast(buffer.data, src=0)
+
+    def _all_reduce_grads(self, module):
+        if not self.distributed:
+            return
+        for parameter in module.parameters():
+            if parameter.grad is None:
+                continue
+            dist.all_reduce(parameter.grad, op=dist.ReduceOp.SUM)
+            parameter.grad.div_(self.world_size)
+
+    def _reduce_mean(self, value):
+        if not self.distributed:
+            return value
+        tensor = torch.tensor(value, device=self.device, dtype=torch.float32)
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        tensor /= self.world_size
+        return tensor.item()
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
@@ -185,6 +217,9 @@ class PPO:
                         kl = torch.sum(
                             torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
                         kl_mean = torch.mean(kl)
+                        if self.distributed:
+                            dist.all_reduce(kl_mean, op=dist.ReduceOp.SUM)
+                            kl_mean /= self.world_size
 
                         if kl_mean > self.desired_kl * 2.0:
                             self.learning_rate = max(1e-5, self.learning_rate / 1.5)
@@ -250,6 +285,7 @@ class PPO:
                 # Gradient step
                 self.optimizer.zero_grad()
                 loss.backward()
+                self._all_reduce_grads(self.actor_critic)
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
@@ -262,6 +298,13 @@ class PPO:
         mean_surrogate_loss /= num_updates
         mean_arm_torques_loss /= num_updates
         mean_priv_reg_loss /= num_updates
+        mean_value_loss = self._reduce_mean(mean_value_loss)
+        mean_surrogate_loss = self._reduce_mean(mean_surrogate_loss)
+        mean_arm_torques_loss = self._reduce_mean(mean_arm_torques_loss)
+        mean_priv_reg_loss = self._reduce_mean(mean_priv_reg_loss)
+        value_mixing_ratio = self._reduce_mean(value_mixing_ratio)
+        torque_supervision_weight = self._reduce_mean(torque_supervision_weight)
+        priv_reg_coef = self._reduce_mean(priv_reg_coef)
         self.storage.clear()
 
         self.update_counter()
@@ -288,12 +331,14 @@ class PPO:
                 hist_latent_loss = (priv_latent_batch.detach() - hist_latent_batch).norm(p=2, dim=1).mean()
                 self.hist_encoder_optimizer.zero_grad()
                 hist_latent_loss.backward()
+                self._all_reduce_grads(self.actor_critic.actor.history_encoder)
                 nn.utils.clip_grad_norm_(self.actor_critic.actor.history_encoder.parameters(), self.max_grad_norm)
                 self.hist_encoder_optimizer.step()
                 
                 mean_hist_latent_loss += hist_latent_loss.item()
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_hist_latent_loss /= num_updates
+        mean_hist_latent_loss = self._reduce_mean(mean_hist_latent_loss)
         self.storage.clear()
         self.update_counter()
         return mean_hist_latent_loss
@@ -330,4 +375,3 @@ class PPO:
         arm_torques = fixed_arm_p_gains * (target_arm_dof_pos + self.default_arm_dof_pos - current_arm_dof_pos) \
             - fixed_arm_d_gains * current_arm_dof_vel
         return arm_torques
-

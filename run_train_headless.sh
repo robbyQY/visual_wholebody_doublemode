@@ -8,6 +8,7 @@ PROJ_NAME="b1z1-low"
 EXPTID="train_default"
 TASK="b1z1"
 MAX_ITERATIONS="10"
+NUM_ENVS=""
 
 LOG_DIR="${ROOT_DIR}/low-level/logs/${PROJ_NAME}/${EXPTID}"
 LOG_FILE="${LOG_DIR}/train.log"
@@ -19,6 +20,30 @@ mkdir -p "${LOG_DIR}"
 if [[ "${DISABLE_WANDB}" == true ]]; then
   export WANDB_DISABLED=true
   export WANDB_SILENT=true
+fi
+
+NUM_GPUS="$(python -c 'import torch; print(torch.cuda.device_count())')"
+
+if [[ -n "${NUM_ENVS}" ]]; then
+  TOTAL_NUM_ENVS="${NUM_ENVS}"
+else
+  TOTAL_NUM_ENVS="<config>"
+fi
+
+if [[ "${NUM_GPUS}" -gt 1 ]]; then
+  DISTRIBUTED=true
+else
+  DISTRIBUTED=false
+fi
+
+if [[ "${TOTAL_NUM_ENVS}" != "<config>" && "${NUM_GPUS}" -gt 0 ]]; then
+  if (( TOTAL_NUM_ENVS % NUM_GPUS == 0 )); then
+    NUM_ENVS_PER_GPU="$(( TOTAL_NUM_ENVS / NUM_GPUS ))"
+  else
+    NUM_ENVS_PER_GPU="<invalid: not divisible>"
+  fi
+else
+  NUM_ENVS_PER_GPU="<resolved in Python>"
 fi
 
 timestamp_log() {
@@ -35,17 +60,44 @@ timestamp_log() {
   echo "EXPTID=${EXPTID}"
   echo "TASK=${TASK}"
   echo "MAX_ITERATIONS=${MAX_ITERATIONS:-<default>}"
+  echo "NUM_ENVS=${TOTAL_NUM_ENVS}"
   echo "LOG_DIR=${LOG_DIR}"
   echo "LOG_FILE=${LOG_FILE}"
   echo "DISABLE_WANDB=${DISABLE_WANDB}"
+  echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+  echo "NUM_GPUS=${NUM_GPUS}"
+  echo "DISTRIBUTED=${DISTRIBUTED}"
+  echo "NUM_ENVS_PER_GPU=${NUM_ENVS_PER_GPU}"
   echo "START_TIME=$(date '+%Y-%m-%d %H:%M:%S %Z')"
   echo
 } | timestamp_log > "${LOG_FILE}"
 
 cd "${SCRIPT_DIR}"
-python train.py \
+
+if [[ "${NUM_GPUS}" -gt 1 ]]; then
+  LAUNCH_CMD=(
+    torchrun
+    --standalone
+    --nnodes=1
+    --nproc_per_node "${NUM_GPUS}"
+    train.py
+  )
+else
+  LAUNCH_CMD=(
+    python
+    train.py
+  )
+fi
+
+{
+  echo "NUM_GPUS=${NUM_GPUS}"
+  echo "LAUNCH_CMD=${LAUNCH_CMD[*]}"
+} | timestamp_log >> "${LOG_FILE}"
+
+"${LAUNCH_CMD[@]}" \
   --proj_name "${PROJ_NAME}" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
+  $([[ -n "${NUM_ENVS}" ]] && echo --num_envs "${NUM_ENVS}") \
   $([[ -n "${MAX_ITERATIONS}" ]] && echo --max_iterations "${MAX_ITERATIONS}") \
   2>&1 | timestamp_log >> "${LOG_FILE}"
