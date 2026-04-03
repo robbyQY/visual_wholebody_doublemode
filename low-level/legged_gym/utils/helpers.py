@@ -136,6 +136,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.terrain.num_cols = args.cols
         if args.observe_gait_commands:
             env_cfg.env.observe_gait_commands = True
+        if args.teleop_mode:
+            env_cfg.env.teleop_mode = True
         if args.record_video:
             env_cfg.env.record_video = args.record_video
         if args.stand_by:
@@ -178,7 +180,7 @@ def get_args(test=False):
         {"name": "--proj_name", "type": str,  "default": "b1z1-low", "help": "run folder name."},
         {"name": "--resumeid", "type": str, "help": "exptid"},
 
-        {"name": "--headless", "action": "store_true", "default": True, "help": "Force display off at all times"},
+        {"name": "--no-headless", "action": "store_true", "help": "Enable viewer rendering"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
         {"name": "--rl_device", "type": str, "default": "cuda:0", "help": 'Device used by the RL algorithm, (cpu, gpu, cuda:0, cuda:1 etc..)'},
         {"name": "--num_envs", "type": int, "help": "Number of environments to create. Overrides config file if provided."},
@@ -187,6 +189,7 @@ def get_args(test=False):
         {"name": "--stochastic", "action": "store_true", "default": False, "help": "Use stochastic actions to play"},
         {"name": "--use_jit", "action": "store_true", "default": False,  "help": "Use jit to play"},
         {"name": "--record_video", "action": "store_true", "default": False,  "help": "Record video to play"},
+        {"name": "--teleop_mode", "action": "store_true", "default": False,  "help": "Enable keyboard teleoperation mode"},
         {"name": "--stand_by", "action": "store_true", "default": False,  "help": "Stand by to play"},
         {"name": "--flat_terrain", "action": "store_true", "default": False,  "help": "Flat the terrain"},
         {"name": "--pitch_control", "action": "store_true", "default": False,  "help": "Control Pitch"},
@@ -201,6 +204,7 @@ def get_args(test=False):
         custom_parameters=custom_parameters)
     
     args.test = test
+    args.headless = not getattr(args, "no_headless", False)
 
     # name allignment
     args.sim_device_id = args.compute_device_id
