@@ -146,6 +146,10 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         if args.vel_obs:
             env_cfg.env.observe_velocities = args.vel_obs
         env_cfg.env.pitch_control = args.pitch_control
+        if args.mixed_height_reference:
+            env_cfg.goal_ee.sphere_center.mixed_height_reference = True
+        if args.trunk_follow_ratio is not None:
+            env_cfg.goal_ee.sphere_center.trunk_follow_ratio = args.trunk_follow_ratio
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -209,6 +213,8 @@ def get_args(test=False):
         {"name": "--flat_terrain", "action": "store_true", "default": False,  "help": "Flat the terrain"},
         {"name": "--pitch_control", "action": "store_true", "default": False,  "help": "Control Pitch"},
         {"name": "--vel_obs", "action": "store_true", "default": False,  "help": "Control Pitch"},
+        {"name": "--mixed_height_reference", "action": "store_true", "default": False, "help": "Train both z-invariant and trunk-height-following goal modes"},
+        {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
         
         {"name": "--rows", "type": int, "help": "num_rows."},
         {"name": "--cols", "type": int, "help": "num_cols"},

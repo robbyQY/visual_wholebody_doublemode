@@ -9,6 +9,8 @@ EXPTID="train_default"
 TASK="b1z1"
 MAX_ITERATIONS="10"
 NUM_ENVS=""
+MIXED_HEIGHT_REFERENCE=false
+TRUNK_FOLLOW_RATIO=""
 
 LOG_DIR="${ROOT_DIR}/low-level/logs/${PROJ_NAME}/${EXPTID}"
 LOG_FILE="${LOG_DIR}/train.log"
@@ -64,6 +66,8 @@ timestamp_log() {
   echo "LOG_DIR=${LOG_DIR}"
   echo "LOG_FILE=${LOG_FILE}"
   echo "DISABLE_WANDB=${DISABLE_WANDB}"
+  echo "MIXED_HEIGHT_REFERENCE=${MIXED_HEIGHT_REFERENCE}"
+  echo "TRUNK_FOLLOW_RATIO=${TRUNK_FOLLOW_RATIO:-<config>}"
   echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
   echo "NUM_GPUS=${NUM_GPUS}"
   echo "DISTRIBUTED=${DISTRIBUTED}"
@@ -98,6 +102,8 @@ fi
   --proj_name "${PROJ_NAME}" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
+  $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
+  $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
   $([[ -n "${NUM_ENVS}" ]] && echo --num_envs "${NUM_ENVS}") \
   $([[ -n "${MAX_ITERATIONS}" ]] && echo --max_iterations "${MAX_ITERATIONS}") \
   2>&1 | timestamp_log >> "${LOG_FILE}"
