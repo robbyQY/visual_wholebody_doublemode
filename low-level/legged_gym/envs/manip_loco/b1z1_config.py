@@ -47,6 +47,8 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             x_offset = 0.3 # Relative to base
             y_offset = 0 # Relative to base
             z_invariant_offset = 0.7 # Relative to terrain
+            mixed_height_reference = False # If true, train both z-invariant and trunk-height-following goal modes, with a mode bit in observations
+            trunk_follow_ratio = 0.5 # Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled
 
         class ranges:
             init_pos_start = [0.5, np.pi/8, 0]

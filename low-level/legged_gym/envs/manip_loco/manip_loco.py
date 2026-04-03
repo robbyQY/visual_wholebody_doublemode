@@ -52,6 +52,10 @@ class ManipLoco(LeggedRobot):
     cfg: B1Z1RoughCfg
 
     def __init__(self, cfg, *args, **kwargs):
+        if cfg.goal_ee.sphere_center.mixed_height_reference:
+            cfg.env.num_proprio += 1
+            cfg.env.num_observations = cfg.env.num_proprio * (cfg.env.history_len+1) + cfg.env.num_priv
+            self.num_obs = cfg.env.num_observations
         if cfg.env.observe_gait_commands:
             print("||||||||||Observe gait commands!")
             cfg.env.num_proprio += 5 # gait_indices=1, clock_phase=4
@@ -214,22 +218,24 @@ class ManipLoco(LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
-        arm_base_pos = self.base_pos + quat_apply(self.base_yaw_quat, self.arm_base_offset)
-        ee_goal_local_cart = quat_rotate_inverse(self.base_quat, self.curr_ee_goal_cart_world - arm_base_pos)
+        # Feed the end-effector command in the moving height-invariant root frame
+        # used by goal sampling, matching the paper's command definition.
+        ee_goal_local_cart = self.curr_ee_goal_cart
         if self.stand_by:
             self.commands[:] = 0.
 
-        obs_buf = torch.cat((       self._get_body_orientation(),  # dim 2
-                                    self.base_ang_vel * self.obs_scales.ang_vel,  # dim 3
-                                    self._reindex_all((self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
-                                    self._reindex_all(self.dof_vel * self.obs_scales.dof_vel)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
-                                    self._reindex_all(self.action_history_buf[:, -1])[:, :12],  # dim 12
-                                    self._reindex_feet(self.foot_contacts_from_sensor),  # dim 4
-                                    self.commands[:, :3] * self.commands_scale,  # dim 3
-                                    # self.curr_ee_goal_sphere,  # dim 3 position
-                                    ee_goal_local_cart,  # dim 3 position
-                                    0*self.curr_ee_goal_sphere  # dim 3 orientation
-                                    ),dim=-1)
+        obs_terms = [self._get_body_orientation(),  # dim 2
+                     self.base_ang_vel * self.obs_scales.ang_vel,  # dim 3
+                     self._reindex_all((self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
+                     self._reindex_all(self.dof_vel * self.obs_scales.dof_vel)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
+                     self._reindex_all(self.action_history_buf[:, -1])[:, :12],  # dim 12
+                     self._reindex_feet(self.foot_contacts_from_sensor),  # dim 4
+                     self.commands[:, :3] * self.commands_scale,  # dim 3
+                     ee_goal_local_cart,  # dim 3 position
+                     0 * self.curr_ee_goal_sphere]  # dim 3 orientation
+        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            obs_terms.append(self.goal_height_follow_mask.float().unsqueeze(1))
+        obs_buf = torch.cat(obs_terms, dim=-1)
         if self.cfg.env.observe_gait_commands:
             obs_buf = torch.cat((obs_buf,
                                       self.gait_indices.unsqueeze(1), self.clock_inputs), dim=-1)
@@ -305,6 +311,9 @@ class ManipLoco(LeggedRobot):
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
+        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            trunk_follow_ratio = self.cfg.goal_ee.sphere_center.trunk_follow_ratio
+            self.goal_height_follow_mask[env_ids] = torch.rand(len(env_ids), device=self.device) < trunk_follow_ratio
 
         if start:
             command_env_ids = env_ids
@@ -800,6 +809,7 @@ class ManipLoco(LeggedRobot):
                                                    self.cfg.goal_ee.sphere_center.y_offset, 
                                                    self.cfg.goal_ee.sphere_center.z_invariant_offset], 
                                                    device=self.device).repeat(self.num_envs, 1)
+        self.goal_height_follow_mask = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         
         self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
 
@@ -1282,7 +1292,12 @@ class ManipLoco(LeggedRobot):
         self._resample_ee_goal(resample_id)
     
     def _get_ee_goal_spherical_center(self):
-        center = torch.cat([self.root_states[:, :2], torch.zeros(self.num_envs, 1, device=self.device)], dim=1)
+        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            trunk_height_delta = (self.root_states[:, 2:3] - self.cfg.init_state.pos[2]) * self.goal_height_follow_mask.unsqueeze(1)
+            center_z = trunk_height_delta
+        else:
+            center_z = torch.zeros(self.num_envs, 1, device=self.device)
+        center = torch.cat([self.root_states[:, :2], center_z], dim=1)
         center = center + quat_apply(self.base_yaw_quat, self.ee_goal_center_offset)
         return center
 
