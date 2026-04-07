@@ -1282,7 +1282,28 @@ class ManipLoco(LeggedRobot):
     def _resample_ee_goal_sphere_once(self, env_ids):
         self.ee_goal_sphere[env_ids, 0] = torch_rand_float(self.goal_ee_ranges["pos_l"][0], self.goal_ee_ranges["pos_l"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         self.ee_goal_sphere[env_ids, 1] = torch_rand_float(self.goal_ee_ranges["pos_p"][0], self.goal_ee_ranges["pos_p"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-        self.ee_goal_sphere[env_ids, 2] = torch_rand_float(self.goal_ee_ranges["pos_y"][0], self.goal_ee_ranges["pos_y"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        self.ee_goal_sphere[env_ids, 2] = self._sample_ee_goal_yaw(env_ids, self.ee_start_sphere[env_ids, 2])
+
+    def _sample_ee_goal_yaw(self, env_ids, reference_yaw=None):
+        if not self.goal_ee_ranges.get("omnidirectional_pos_y", False):
+            return torch_rand_float(
+                self.goal_ee_ranges["pos_y"][0],
+                self.goal_ee_ranges["pos_y"][1],
+                (len(env_ids), 1),
+                device=self.device
+            ).squeeze(1)
+
+        if reference_yaw is None:
+            return torch_rand_float(-np.pi, np.pi, (len(env_ids), 1), device=self.device).squeeze(1)
+
+        yaw_delta = torch_rand_float(
+            self.goal_ee_ranges["pos_y"][0],
+            self.goal_ee_ranges["pos_y"][1],
+            (len(env_ids), 1),
+            device=self.device
+        ).squeeze(1)
+        return wrap_to_pi(reference_yaw + yaw_delta)
+    
     def _resample_ee_goal_orn_once(self, env_ids):
         ee_goal_delta_orn_r = torch_rand_float(self.goal_ee_ranges["delta_orn_r"][0], self.goal_ee_ranges["delta_orn_r"][1], (len(env_ids), 1), device=self.device)
         ee_goal_delta_orn_p = torch_rand_float(self.goal_ee_ranges["delta_orn_p"][0], self.goal_ee_ranges["delta_orn_p"][1], (len(env_ids), 1), device=self.device)
@@ -1320,8 +1341,14 @@ class ManipLoco(LeggedRobot):
             
             if is_init:
                 self.ee_goal_orn_delta_rpy[env_ids, :] = 0
-                self.ee_start_sphere[env_ids] = self.init_start_ee_sphere[:]
-                self.ee_goal_sphere[env_ids] = self.init_end_ee_sphere[:]
+                init_start_sphere = self.init_start_ee_sphere.repeat(len(env_ids), 1)
+                init_goal_sphere = self.init_end_ee_sphere.repeat(len(env_ids), 1)
+
+                init_start_sphere[:, 2] = self._sample_ee_goal_yaw(env_ids)
+                init_goal_sphere[:, 2] = self._sample_ee_goal_yaw(env_ids, init_start_sphere[:, 2])
+
+                self.ee_start_sphere[env_ids] = init_start_sphere
+                self.ee_goal_sphere[env_ids] = init_goal_sphere
             else:
                 self._resample_ee_goal_orn_once(env_ids)
                 self.ee_start_sphere[env_ids] = self.ee_goal_sphere[env_ids].clone()
