@@ -35,6 +35,10 @@ class ManipLoco_Policy():
         self.init_logger()
         self.timestamp = 0
 
+    def _format_vec3(self, tensor, env_id=0):
+        values = tensor[env_id].detach().cpu().tolist()
+        return [round(v, 3) for v in values]
+
     def init_logger(self):
         logger = Logger(self.env.dt)
         robot_index = 0 # which robot is used for logging
@@ -102,7 +106,12 @@ class ManipLoco_Policy():
         self.obs, _, rews, arm_rews, dones, infos = self.env.step(actions.detach())
 
         if self.timestamp % 10 == 0:
-            print(self.env.ee_pos,self.env.curr_ee_goal_cart_world)
+            actual_ee_pos = self._format_vec3(self.env.ee_pos)
+            target_ee_pos = self._format_vec3(self.env.curr_ee_goal_cart_world)
+            print(
+                f"[teleop][env0] ee_pos_world={actual_ee_pos}, "
+                f"ee_goal_world={target_ee_pos}"
+            )
         stop_time = time.time()
         duration = stop_time - start_time
         time.sleep(max(0.02 - duration, 0))

@@ -97,6 +97,7 @@ class ManipLoco(LeggedRobot):
         arm_pos_targets = self._control_ik(dpose) + self.dof_pos[:, -(6 + self.cfg.env.num_gripper_joints):-self.cfg.env.num_gripper_joints]
         all_pos_targets = torch.zeros_like(self.dof_pos)
         all_pos_targets[:, -(6 + self.cfg.env.num_gripper_joints):-self.cfg.env.num_gripper_joints] = arm_pos_targets
+        all_pos_targets[:, -self.cfg.env.num_gripper_joints:] = self.gripper_pos_targets
 
         for t in range(self.cfg.control.decimation):
             self.torques = self._compute_torques(self.actions)
@@ -858,6 +859,7 @@ class ManipLoco(LeggedRobot):
         
         # self.target_ee = torch.zeros(self.num_envs, self.cfg.target_ee.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # ee x, ee y, ee z
         self.gripper_torques_zero = torch.zeros(self.num_envs, self.cfg.env.num_gripper_joints, device=self.device)
+        self.gripper_pos_targets = torch.zeros(self.num_envs, self.cfg.env.num_gripper_joints, device=self.device)
 
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
@@ -886,6 +888,7 @@ class ManipLoco(LeggedRobot):
                     raise Exception(f"PD gain of joint {name} were not defined, setting them to zero")
         # self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
         self.default_dof_pos_wo_gripper = self.default_dof_pos[:-self.cfg.env.num_gripper_joints]
+        self.gripper_pos_targets[:] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
         
         self.global_steps = 0
 
@@ -936,6 +939,7 @@ class ManipLoco(LeggedRobot):
         """
         self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(0.8, 1.2, (len(env_ids), self.num_dofs), device=self.device)
         self.dof_vel[env_ids] = 0.
+        self.gripper_pos_targets[env_ids] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
 
         self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
         self.gym.refresh_rigid_body_state_tensor(self.sim)
@@ -1353,9 +1357,11 @@ class ManipLoco(LeggedRobot):
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_Z, "increase_eef_goal_dr")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_X, "decrease_eef_goal_dr")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_C, "increse_eef_goal_dp")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_V, "decrease_eef_goal_dp")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_M, "decrease_eef_goal_dp")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_B, "increase_eef_goal_dy")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_N, "decrease_eef_goal_dy")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "open_gripper")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "close_gripper")
 
     def handle_viewer_action_event(self, evt):
         super().handle_viewer_action_event(evt)
@@ -1428,3 +1434,14 @@ class ManipLoco(LeggedRobot):
             self.ee_goal_orn_delta_rpy[:, 2] += 0.05
         elif evt.action == "decrease_eef_goal_dy":
             self.ee_goal_orn_delta_rpy[:, 2] -= 0.05
+
+        if evt.action == "open_gripper":
+            self.gripper_pos_targets += 0.05
+        elif evt.action == "close_gripper":
+            self.gripper_pos_targets -= 0.05
+
+        self.gripper_pos_targets = torch.clip(
+            self.gripper_pos_targets,
+            self.dof_pos_limits[-self.cfg.env.num_gripper_joints:, 0],
+            self.dof_pos_limits[-self.cfg.env.num_gripper_joints:, 1],
+        )

@@ -101,6 +101,11 @@ class BaseTask():
         self.free_cam = False
         self.lookat_id = 0
         self.lookat_vec = torch.tensor([-0, 2, 1], requires_grad=False, device=self.device)
+        self.camera_orbit_radius_min = 0.5
+        self.camera_orbit_pitch_limit = np.deg2rad(85.0)
+        self.camera_orbit_yaw_step = np.deg2rad(5.0)
+        self.camera_orbit_pitch_step = np.deg2rad(5.0)
+        self.camera_orbit_radius_step = 0.2
 
     def subscribe_viewer_keyboard_events(self):
         self.gym.subscribe_viewer_keyboard_event(
@@ -109,7 +114,7 @@ class BaseTask():
             self.viewer, gymapi.KEY_V, "toggle_viewer_sync")
         self.gym.subscribe_viewer_keyboard_event(
             self.viewer, gymapi.KEY_F, "free_cam")
-        for i in range(9):
+        for i in range(min(9, self.num_envs)):
             self.gym.subscribe_viewer_keyboard_event(
             self.viewer, getattr(gymapi, "KEY_"+str(i)), "lookat"+str(i))
         self.gym.subscribe_viewer_keyboard_event(
@@ -118,6 +123,18 @@ class BaseTask():
             self.viewer, gymapi.KEY_RIGHT_BRACKET, "next_id")
         self.gym.subscribe_viewer_keyboard_event(
             self.viewer, gymapi.KEY_SPACE, "pause")
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_LEFT, "camera_orbit_left")
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_RIGHT, "camera_orbit_right")
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_UP, "camera_orbit_up")
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_DOWN, "camera_orbit_down")
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_PAGE_UP, "camera_orbit_zoom_in")
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_PAGE_DOWN, "camera_orbit_zoom_out")
 
 
     def get_observations(self):
@@ -140,9 +157,36 @@ class BaseTask():
         raise NotImplementedError
 
     def lookat(self, i):
+        if i < 0 or i >= self.num_envs:
+            return
         look_at_pos = self.root_states[i, :3].clone()
         cam_pos = look_at_pos + self.lookat_vec
         self.set_camera(cam_pos, look_at_pos)
+
+    def _orbit_camera(self, delta_yaw=0.0, delta_pitch=0.0, delta_radius=0.0):
+        radius = torch.norm(self.lookat_vec).item()
+        if radius < 1e-6:
+            radius = 1.0
+
+        yaw = np.arctan2(self.lookat_vec[1].item(), self.lookat_vec[0].item())
+        pitch = np.arcsin(np.clip(self.lookat_vec[2].item() / radius, -1.0, 1.0))
+
+        radius = max(self.camera_orbit_radius_min, radius + delta_radius)
+        pitch = np.clip(pitch + delta_pitch, -self.camera_orbit_pitch_limit, self.camera_orbit_pitch_limit)
+        yaw = yaw + delta_yaw
+
+        cos_pitch = np.cos(pitch)
+        self.lookat_vec = torch.tensor(
+            [
+                radius * cos_pitch * np.cos(yaw),
+                radius * cos_pitch * np.sin(yaw),
+                radius * np.sin(pitch),
+            ],
+            device=self.device,
+            dtype=torch.float,
+            requires_grad=False,
+        )
+        self.lookat(self.lookat_id)
 
     def handle_viewer_action_event(self, evt):
         if evt.action == "QUIT" and evt.value > 0:
@@ -151,7 +195,7 @@ class BaseTask():
             self.enable_viewer_sync = not self.enable_viewer_sync
 
         if not self.free_cam:
-            for i in range(9):
+            for i in range(min(9, self.num_envs)):
                 if evt.action == "lookat" + str(i) and evt.value > 0:
                     self.lookat(i)
                     self.lookat_id = i
@@ -161,6 +205,18 @@ class BaseTask():
             if evt.action == "next_id" and evt.value > 0:
                 self.lookat_id  = (self.lookat_id+1) % self.num_envs
                 self.lookat(self.lookat_id)
+            if evt.action == "camera_orbit_left" and evt.value > 0:
+                self._orbit_camera(delta_yaw=-self.camera_orbit_yaw_step)
+            if evt.action == "camera_orbit_right" and evt.value > 0:
+                self._orbit_camera(delta_yaw=self.camera_orbit_yaw_step)
+            if evt.action == "camera_orbit_up" and evt.value > 0:
+                self._orbit_camera(delta_pitch=self.camera_orbit_pitch_step)
+            if evt.action == "camera_orbit_down" and evt.value > 0:
+                self._orbit_camera(delta_pitch=-self.camera_orbit_pitch_step)
+            if evt.action == "camera_orbit_zoom_in" and evt.value > 0:
+                self._orbit_camera(delta_radius=-self.camera_orbit_radius_step)
+            if evt.action == "camera_orbit_zoom_out" and evt.value > 0:
+                self._orbit_camera(delta_radius=self.camera_orbit_radius_step)
                     
         if evt.action == "free_cam" and evt.value > 0:
             self.free_cam = not self.free_cam
@@ -207,5 +263,3 @@ class BaseTask():
                 cam_trans = torch.tensor([p.x, p.y, p.z], requires_grad=False, device=self.device)
                 look_at_pos = self.root_states[self.lookat_id, :3].clone()
                 self.lookat_vec = cam_trans - look_at_pos
-            
-            
