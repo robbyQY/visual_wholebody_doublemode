@@ -314,9 +314,7 @@ class ManipLoco(LeggedRobot):
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
-        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
-            trunk_follow_ratio = self.cfg.goal_ee.sphere_center.trunk_follow_ratio
-            self.goal_height_follow_mask[env_ids] = torch.rand(len(env_ids), device=self.device) < trunk_follow_ratio
+        self._resample_goal_height_reference(env_ids, is_init=start)
 
         if start:
             command_env_ids = env_ids
@@ -815,6 +813,7 @@ class ManipLoco(LeggedRobot):
                                                    self.cfg.goal_ee.sphere_center.z_invariant_offset], 
                                                    device=self.device).repeat(self.num_envs, 1)
         self.goal_height_follow_mask = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.goal_height_follow_override = None
         
         self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
 
@@ -1289,6 +1288,23 @@ class ManipLoco(LeggedRobot):
         ee_goal_delta_orn_p = torch_rand_float(self.goal_ee_ranges["delta_orn_p"][0], self.goal_ee_ranges["delta_orn_p"][1], (len(env_ids), 1), device=self.device)
         ee_goal_delta_orn_y = torch_rand_float(self.goal_ee_ranges["delta_orn_y"][0], self.goal_ee_ranges["delta_orn_y"][1], (len(env_ids), 1), device=self.device)
         self.ee_goal_orn_delta_rpy[env_ids, :] = torch.cat([ee_goal_delta_orn_r, ee_goal_delta_orn_p, ee_goal_delta_orn_y], dim=-1)
+
+    def _resample_goal_height_reference(self, env_ids, is_init=False):
+        if not self.cfg.goal_ee.sphere_center.mixed_height_reference or len(env_ids) == 0:
+            return
+
+        if self.cfg.env.teleop_mode and is_init:
+            if self.goal_height_follow_override is None:
+                self.goal_height_follow_mask[env_ids] = False
+            else:
+                self.goal_height_follow_mask[env_ids] = self.goal_height_follow_override
+            return
+        elif self.cfg.env.teleop_mode:
+            return
+
+        trunk_follow_ratio = self.cfg.goal_ee.sphere_center.trunk_follow_ratio
+        self.goal_height_follow_mask[env_ids] = torch.rand(len(env_ids), device=self.device) < trunk_follow_ratio
+
     def _resample_ee_goal(self, env_ids, is_init=False):
         if self.cfg.env.teleop_mode and is_init:
             self.curr_ee_goal_sphere[:] = self.init_start_ee_sphere[:]
@@ -1423,6 +1439,9 @@ class ManipLoco(LeggedRobot):
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_N, "decrease_eef_goal_dy")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "open_gripper")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "close_gripper")
+            if self.cfg.goal_ee.sphere_center.mixed_height_reference:
+                self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "set_height_reference_invariant")
+                self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_T, "set_height_reference_follow")
 
     def handle_viewer_action_event(self, evt):
         super().handle_viewer_action_event(evt)
@@ -1505,3 +1524,13 @@ class ManipLoco(LeggedRobot):
         )
 
         self._update_effective_teleop_inputs()
+
+        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            if evt.action == "set_height_reference_invariant":
+                self.goal_height_follow_override = False
+                self.goal_height_follow_mask[:] = False
+                print("[teleop] height reference mode: z-invariant (obs bit = 0)")
+            elif evt.action == "set_height_reference_follow":
+                self.goal_height_follow_override = True
+                self.goal_height_follow_mask[:] = True
+                print("[teleop] height reference mode: trunk-follow (obs bit = 1)")
