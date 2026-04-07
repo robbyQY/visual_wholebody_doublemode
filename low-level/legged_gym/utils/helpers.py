@@ -139,6 +139,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.observe_gait_commands = True
         if args.teleop_mode:
             env_cfg.env.teleop_mode = True
+        if args.teleop_input_regularization:
+            env_cfg.env.teleop_input_regularization = True
         if args.record_video:
             env_cfg.env.record_video = args.record_video
         if args.stand_by:
@@ -209,6 +211,7 @@ def get_args(test=False):
         {"name": "--use_jit", "action": "store_true", "default": False,  "help": "Use jit to play"},
         {"name": "--record_video", "action": "store_true", "default": False,  "help": "Record video to play"},
         {"name": "--teleop_mode", "action": "store_true", "default": False,  "help": "Enable keyboard teleoperation mode"},
+        {"name": "--teleop_input_regularization", "action": "store_true", "default": False, "help": "Preprocess teleop raw commands and arm targets before feeding the policy/control stack"},
         {"name": "--stand_by", "action": "store_true", "default": False,  "help": "Stand by to play"},
         {"name": "--flat_terrain", "action": "store_true", "default": False,  "help": "Flat the terrain"},
         {"name": "--pitch_control", "action": "store_true", "default": False,  "help": "Control Pitch"},

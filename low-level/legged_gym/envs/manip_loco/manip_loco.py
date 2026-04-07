@@ -222,6 +222,8 @@ class ManipLoco(LeggedRobot):
         # Feed the end-effector command in the moving height-invariant root frame
         # used by goal sampling, matching the paper's command definition.
         ee_goal_local_cart = self.curr_ee_goal_cart
+        if self.cfg.env.teleop_mode:
+            self._update_effective_teleop_inputs()
         if self.stand_by:
             self.commands[:] = 0.
 
@@ -790,6 +792,8 @@ class ManipLoco(LeggedRobot):
 
         self.curr_ee_goal_cart = torch.zeros(self.num_envs, 3, device=self.device)
         self.curr_ee_goal_sphere = torch.zeros(self.num_envs, 3, device=self.device)
+        self.teleop_raw_ee_goal_cart = torch.zeros(self.num_envs, 3, device=self.device)
+        self.teleop_raw_ee_goal_orn_delta_rpy = torch.zeros(self.num_envs, 3, device=self.device)
 
         self.init_start_ee_sphere = torch.tensor(self.cfg.goal_ee.ranges.init_pos_start, device=self.device).unsqueeze(0)
         self.init_end_ee_sphere = torch.tensor(self.cfg.goal_ee.ranges.init_pos_end, device=self.device).unsqueeze(0)
@@ -843,6 +847,7 @@ class ManipLoco(LeggedRobot):
         self.last_torques = torch.zeros_like(self.torques)
 
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
+        self.teleop_raw_commands = torch.zeros_like(self.commands)
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel],
                                            device=self.device, requires_grad=False, )[:self.cfg.commands.num_commands]
         # Refer to <walk these ways>, only useful when `self.cfg.env.observe_gait_commands` is True
@@ -963,6 +968,55 @@ class ManipLoco(LeggedRobot):
         self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         # set small commands to zero
         self.commands[env_ids, :] *= (torch.logical_or(torch.abs(self.commands[env_ids, 0]) > self.cfg.commands.lin_vel_x_clip, torch.abs(self.commands[env_ids, 2]) > self.cfg.commands.ang_vel_yaw_clip)).unsqueeze(1)
+
+    def _update_effective_teleop_inputs(self):
+        if not self.cfg.env.teleop_mode:
+            return
+
+        self.commands[:] = self.teleop_raw_commands
+        if self.cfg.env.teleop_input_regularization:
+            self.commands[:, 0] = torch.clip(
+                self.commands[:, 0],
+                -self.cfg.env.teleop_lin_vel_x_limit,
+                self.cfg.env.teleop_lin_vel_x_limit,
+            )
+            self.commands[:, 2] = torch.clip(
+                self.commands[:, 2],
+                -self.cfg.env.teleop_ang_vel_yaw_limit,
+                self.cfg.env.teleop_ang_vel_yaw_limit,
+            )
+            active_mask = torch.logical_or(
+                torch.abs(self.commands[:, 0]) > self.cfg.env.teleop_zero_lin_vel_x_clip,
+                torch.abs(self.commands[:, 2]) > self.cfg.env.teleop_zero_ang_vel_yaw_clip
+            ).unsqueeze(1)
+            self.commands[:] *= active_mask
+
+            self.curr_ee_goal_cart[:] = self.teleop_raw_ee_goal_cart
+            self.curr_ee_goal_cart[:, 0] = torch.clip(
+                self.curr_ee_goal_cart[:, 0],
+                self.cfg.env.teleop_ee_goal_x_limit[0],
+                self.cfg.env.teleop_ee_goal_x_limit[1],
+            )
+            self.curr_ee_goal_cart[:, 1] = torch.clip(
+                self.curr_ee_goal_cart[:, 1],
+                self.cfg.env.teleop_ee_goal_y_limit[0],
+                self.cfg.env.teleop_ee_goal_y_limit[1],
+            )
+            self.curr_ee_goal_cart[:, 2] = torch.clip(
+                self.curr_ee_goal_cart[:, 2],
+                self.cfg.env.teleop_ee_goal_z_limit[0],
+                self.cfg.env.teleop_ee_goal_z_limit[1],
+            )
+            self.ee_goal_orn_delta_rpy[:] = torch.clip(
+                self.teleop_raw_ee_goal_orn_delta_rpy,
+                min=torch.tensor(self.cfg.goal_ee.ranges.delta_orn_r[0:1] + self.cfg.goal_ee.ranges.delta_orn_p[0:1] + self.cfg.goal_ee.ranges.delta_orn_y[0:1], device=self.device),
+                max=torch.tensor(self.cfg.goal_ee.ranges.delta_orn_r[1:2] + self.cfg.goal_ee.ranges.delta_orn_p[1:2] + self.cfg.goal_ee.ranges.delta_orn_y[1:2], device=self.device),
+            )
+        else:
+            self.curr_ee_goal_cart[:] = self.teleop_raw_ee_goal_cart
+            self.ee_goal_orn_delta_rpy[:] = self.teleop_raw_ee_goal_orn_delta_rpy
+
+        self.curr_ee_goal_sphere[:] = cart2sphere(self.curr_ee_goal_cart)
 
     def _step_contact_targets(self):
         if self.cfg.env.observe_gait_commands:
@@ -1230,16 +1284,17 @@ class ManipLoco(LeggedRobot):
         self.ee_goal_sphere[env_ids, 0] = torch_rand_float(self.goal_ee_ranges["pos_l"][0], self.goal_ee_ranges["pos_l"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         self.ee_goal_sphere[env_ids, 1] = torch_rand_float(self.goal_ee_ranges["pos_p"][0], self.goal_ee_ranges["pos_p"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         self.ee_goal_sphere[env_ids, 2] = torch_rand_float(self.goal_ee_ranges["pos_y"][0], self.goal_ee_ranges["pos_y"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-    
     def _resample_ee_goal_orn_once(self, env_ids):
         ee_goal_delta_orn_r = torch_rand_float(self.goal_ee_ranges["delta_orn_r"][0], self.goal_ee_ranges["delta_orn_r"][1], (len(env_ids), 1), device=self.device)
         ee_goal_delta_orn_p = torch_rand_float(self.goal_ee_ranges["delta_orn_p"][0], self.goal_ee_ranges["delta_orn_p"][1], (len(env_ids), 1), device=self.device)
         ee_goal_delta_orn_y = torch_rand_float(self.goal_ee_ranges["delta_orn_y"][0], self.goal_ee_ranges["delta_orn_y"][1], (len(env_ids), 1), device=self.device)
         self.ee_goal_orn_delta_rpy[env_ids, :] = torch.cat([ee_goal_delta_orn_r, ee_goal_delta_orn_p, ee_goal_delta_orn_y], dim=-1)
-
     def _resample_ee_goal(self, env_ids, is_init=False):
         if self.cfg.env.teleop_mode and is_init:
             self.curr_ee_goal_sphere[:] = self.init_start_ee_sphere[:]
+            self.teleop_raw_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
+            self.teleop_raw_ee_goal_orn_delta_rpy[:] = 0
+            self._update_effective_teleop_inputs()
             return
         elif self.cfg.env.teleop_mode:
             return
@@ -1274,9 +1329,12 @@ class ManipLoco(LeggedRobot):
         if not self.cfg.env.teleop_mode:
             t = torch.clip(self.goal_timer / self.traj_timesteps, 0, 1)
             self.curr_ee_goal_sphere[:] = torch.lerp(self.ee_start_sphere, self.ee_goal_sphere, t[:, None])
+        else:
+            self._update_effective_teleop_inputs()
 
         # TODO: for the teleop mode, we need to directly update self.curr_ee_goal_cart using VR controller.
-        self.curr_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
+        if not self.cfg.env.teleop_mode:
+            self.curr_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
         ee_goal_cart_yaw_global = quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
         self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + ee_goal_cart_yaw_global
         
@@ -1292,6 +1350,9 @@ class ManipLoco(LeggedRobot):
             # set these env commands as 0
             self.commands[resample_id, 0] = 0
             self.commands[resample_id, 2] = 0
+            if self.cfg.env.teleop_mode:
+                self.teleop_raw_commands[resample_id, 0] = 0
+                self.teleop_raw_commands[resample_id, 2] = 0
 
         self._resample_ee_goal(resample_id)
     
@@ -1369,21 +1430,20 @@ class ManipLoco(LeggedRobot):
         if evt.value <= 0:
             return
         if evt.action == "stop_linear":
-            self.commands[:, 0] = 0
+            self.teleop_raw_commands[:, 0] = 0
         elif evt.action == "forward":
-            self.commands[:, 0] += 0.05
+            self.teleop_raw_commands[:, 0] += 0.05
         elif evt.action == "reverse":
-            self.commands[:, 0] -= 0.05
+            self.teleop_raw_commands[:, 0] -= 0.05
 
         if evt.action == "stop_angular":
-            self.commands[:, 2] = 0
+            self.teleop_raw_commands[:, 2] = 0
         if evt.action == "turn_left":
-            self.commands[:, 2] += 0.05
+            self.teleop_raw_commands[:, 2] += 0.05
         elif evt.action == "turn_right":
-            self.commands[:, 2] -= 0.05
+            self.teleop_raw_commands[:, 2] -= 0.05
 
-
-
+        self._update_effective_teleop_inputs()
 
         # Sphere position
         # if evt.action == "increase_eef_goal_l":
@@ -1403,37 +1463,35 @@ class ManipLoco(LeggedRobot):
 
         # cartesian position
         if evt.action == "increase_eef_goal_l":
-            self.curr_ee_goal_cart[:, 0] += 0.05
+            self.teleop_raw_ee_goal_cart[:, 0] += 0.05
         elif evt.action == "decrease_eef_goal_l":
-            self.curr_ee_goal_cart[:, 0] -= 0.05
+            self.teleop_raw_ee_goal_cart[:, 0] -= 0.05
 
         if evt.action == "increase_eef_goal_p":
-            self.curr_ee_goal_cart[:, 1] += 0.05
+            self.teleop_raw_ee_goal_cart[:, 1] += 0.05
         elif evt.action == "decrease_eef_goal_p":
-            self.curr_ee_goal_cart[:, 1] -= 0.05
+            self.teleop_raw_ee_goal_cart[:, 1] -= 0.05
 
         if evt.action == "increase_eef_goal_y":
-            self.curr_ee_goal_cart[:, 2] += 0.05
+            self.teleop_raw_ee_goal_cart[:, 2] += 0.05
         elif evt.action == "decrease_eef_goal_y":
-            self.curr_ee_goal_cart[:, 2] -= 0.05
-
-        self.curr_ee_goal_sphere = cart2sphere(self.curr_ee_goal_cart)
+            self.teleop_raw_ee_goal_cart[:, 2] -= 0.05
         
         # orientation
         if evt.action == "increase_eef_goal_dr":
-            self.ee_goal_orn_delta_rpy[:, 0] += 0.05
+            self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] += 0.05
         elif evt.action == "decrease_eef_goal_dr":
-            self.ee_goal_orn_delta_rpy[:, 0] -= 0.05
+            self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] -= 0.05
 
         if evt.action == "increse_eef_goal_dp":
-            self.ee_goal_orn_delta_rpy[:, 1] += 0.05
+            self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] += 0.05
         elif evt.action == "decrease_eef_goal_dp":
-            self.ee_goal_orn_delta_rpy[:, 1] -= 0.05
+            self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] -= 0.05
         
         if evt.action == "increase_eef_goal_dy":
-            self.ee_goal_orn_delta_rpy[:, 2] += 0.05
+            self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] += 0.05
         elif evt.action == "decrease_eef_goal_dy":
-            self.ee_goal_orn_delta_rpy[:, 2] -= 0.05
+            self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] -= 0.05
 
         if evt.action == "open_gripper":
             self.gripper_pos_targets += 0.05
@@ -1445,3 +1503,5 @@ class ManipLoco(LeggedRobot):
             self.dof_pos_limits[-self.cfg.env.num_gripper_joints:, 0],
             self.dof_pos_limits[-self.cfg.env.num_gripper_joints:, 1],
         )
+
+        self._update_effective_teleop_inputs()

@@ -117,6 +117,14 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         episode_length_s = 10 # episode length in seconds
         reorder_dofs = True
         teleop_mode = False # Overriden in teleop.py. When true, commands come from keyboard
+        teleop_input_regularization = False # If true, preprocess teleop inputs before feeding the policy/control stack
+        teleop_zero_lin_vel_x_clip = 0.2
+        teleop_zero_ang_vel_yaw_clip = 0.5
+        teleop_lin_vel_x_limit = 0.4
+        teleop_ang_vel_yaw_limit = 0.6
+        teleop_ee_goal_x_limit = [0.0, 0.7]
+        teleop_ee_goal_y_limit = [-0.7, 0.7]
+        teleop_ee_goal_z_limit = [-0.6, 0.6]
         record_video = False
         stand_by = False
         observe_gait_commands = False
