@@ -33,6 +33,7 @@ import copy
 import sys
 import json
 import re
+import glob
 import torch
 import numpy as np
 import random
@@ -48,6 +49,14 @@ def get_log_root():
 
 def get_run_log_dir(proj_name, exptid):
     return os.path.join(get_log_root(), proj_name, exptid)
+
+def get_run_metadata_filename(filename=None):
+    if filename is not None:
+        return filename
+    return os.environ.get("LEGGED_GYM_RUN_METADATA_FILENAME", RUN_METADATA_FILENAME)
+
+def get_run_metadata_path(log_dir, filename=None):
+    return os.path.join(log_dir, get_run_metadata_filename(filename))
 
 def class_to_dict(obj) -> dict:
     if not  hasattr(obj,"__dict__"):
@@ -98,7 +107,7 @@ def _extract_checkpoint_features(args, env_cfg):
         "mixed_height_reference": mixed_height_reference,
     }
 
-def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None):
+def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
     os.makedirs(log_dir, exist_ok=True)
     metadata = {
         "checkpoint_features": _extract_checkpoint_features(args, env_cfg),
@@ -109,19 +118,19 @@ def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None):
     if train_cfg is not None:
         metadata["train_cfg"] = _json_safe(class_to_dict(train_cfg))
 
-    metadata_path = os.path.join(log_dir, RUN_METADATA_FILENAME)
+    metadata_path = get_run_metadata_path(log_dir, filename=filename)
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, sort_keys=True)
     return metadata_path
 
-def update_run_metadata(log_dir, updates):
+def update_run_metadata(log_dir, updates, filename=None):
     os.makedirs(log_dir, exist_ok=True)
-    metadata = load_run_metadata(log_dir) or {}
+    metadata = load_run_metadata(log_dir, filename=filename) or {}
     metadata.pop("_source", None)
     for key, value in updates.items():
         metadata[key] = _json_safe(value)
 
-    metadata_path = os.path.join(log_dir, RUN_METADATA_FILENAME)
+    metadata_path = get_run_metadata_path(log_dir, filename=filename)
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, sort_keys=True)
     return metadata_path
@@ -203,9 +212,22 @@ def _parse_bool_from_train_log(log_path, key):
                 value = match.group(1).lower() == "true"
     return value
 
-def load_run_metadata(log_dir):
-    metadata_path = os.path.join(log_dir, RUN_METADATA_FILENAME)
-    if os.path.isfile(metadata_path):
+def load_run_metadata(log_dir, filename=None):
+    preferred_path = get_run_metadata_path(log_dir, filename=filename)
+    metadata_candidates = []
+    if os.path.isfile(preferred_path):
+        metadata_candidates.append(preferred_path)
+
+    glob_pattern = os.path.join(log_dir, "run_metadata*.json")
+    extra_candidates = [
+        path for path in glob.glob(glob_pattern)
+        if os.path.isfile(path) and path not in metadata_candidates
+    ]
+    extra_candidates.sort(key=os.path.getmtime, reverse=True)
+    metadata_candidates.extend(extra_candidates)
+
+    if metadata_candidates:
+        metadata_path = metadata_candidates[0]
         with open(metadata_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         data["_source"] = metadata_path
@@ -383,6 +405,7 @@ def get_args(test=False):
         {"name": "--proj_name", "type": str,  "default": "b1z1-low", "help": "run folder name."},
         {"name": "--resumeid", "type": str, "help": "exptid"},
         {"name": "--load_exptid", "type": str, "help": "Checkpoint source exptid for load mode. Loads weights only and starts training from iteration 0."},
+        {"name": "--train_mode", "type": str, "default": "fresh", "help": "Training mode: fresh, resume, or load."},
 
         {"name": "--no-headless", "action": "store_true", "help": "Enable viewer rendering"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
