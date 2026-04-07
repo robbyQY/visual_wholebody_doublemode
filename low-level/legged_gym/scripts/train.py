@@ -37,7 +37,7 @@ import torch.distributed as dist
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from legged_gym.envs import *
 from legged_gym.utils import get_args, task_registry, class_to_dict
-from legged_gym.utils.helpers import save_run_metadata, get_run_log_dir
+from legged_gym.utils.helpers import load_run_metadata, save_run_metadata, update_run_metadata, get_run_log_dir
 import torch
 import wandb
 
@@ -65,6 +65,27 @@ def build_wandb_config(args, env_cfg, train_cfg, log_pth):
             "rl_device": args.rl_device,
         },
     })
+
+def get_wandb_init_kwargs(args, log_pth, mode):
+    init_kwargs = {
+        "project": args.proj_name,
+        "name": args.exptid,
+        "mode": mode,
+        "dir": LEGGED_GYM_ENVS_DIR + "/logs",
+    }
+    if mode == "disabled":
+        return init_kwargs
+
+    if args.resume:
+        metadata = load_run_metadata(log_pth) or {}
+        wandb_info = metadata.get("wandb", {})
+        run_id = wandb_info.get("run_id")
+        if run_id:
+            init_kwargs["id"] = run_id
+            init_kwargs["resume"] = "must"
+        else:
+            print(f"Warning: no wandb run_id found under {log_pth}; resume mode will start a new wandb run.")
+    return init_kwargs
 
 def setup_distributed(args):
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -103,13 +124,22 @@ def train(args):
         mode = "online"
     if args.rank != 0:
         mode = "disabled"
-    wandb.init(project=args.proj_name, name=args.exptid, mode=mode, dir=LEGGED_GYM_ENVS_DIR +"/logs")
+    wandb.init(**get_wandb_init_kwargs(args, log_pth, mode))
 
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     ppo_runner, train_cfg, _ = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args)
 
     if args.rank == 0:
         save_run_metadata(log_pth, args, env_cfg, train_cfg)
+        update_run_metadata(log_pth, {
+            "wandb": {
+                "entity": getattr(wandb.run, "entity", None),
+                "name": getattr(wandb.run, "name", None),
+                "project": getattr(wandb.run, "project", None),
+                "run_id": getattr(wandb.run, "id", None),
+                "url": getattr(wandb.run, "url", None),
+            }
+        })
         wandb.config.update(build_wandb_config(args, env_cfg, train_cfg, log_pth), allow_val_change=True)
         wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/b1z1_config.py", policy="now")
         wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")

@@ -114,6 +114,83 @@ def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None):
         json.dump(metadata, f, indent=2, sort_keys=True)
     return metadata_path
 
+def update_run_metadata(log_dir, updates):
+    os.makedirs(log_dir, exist_ok=True)
+    metadata = load_run_metadata(log_dir) or {}
+    metadata.pop("_source", None)
+    for key, value in updates.items():
+        metadata[key] = _json_safe(value)
+
+    metadata_path = os.path.join(log_dir, RUN_METADATA_FILENAME)
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, sort_keys=True)
+    return metadata_path
+
+def load_matching_checkpoint_weights(module, checkpoint_path, device="cpu"):
+    loaded_obj = torch.load(checkpoint_path, map_location=device)
+    if isinstance(loaded_obj, dict) and "model_state_dict" in loaded_obj:
+        checkpoint_state = loaded_obj["model_state_dict"]
+    elif isinstance(loaded_obj, dict):
+        checkpoint_state = loaded_obj
+    else:
+        raise ValueError(f"Unsupported checkpoint format: {type(loaded_obj)}")
+
+    model_state = module.state_dict()
+    matched_state = {}
+    missing_keys = []
+    unexpected_keys = []
+    shape_mismatched_keys = []
+
+    for key, tensor in checkpoint_state.items():
+        if key not in model_state:
+            unexpected_keys.append(key)
+            continue
+        if model_state[key].shape != tensor.shape:
+            shape_mismatched_keys.append(
+                f"{key} (checkpoint={tuple(tensor.shape)}, model={tuple(model_state[key].shape)})"
+            )
+            continue
+        matched_state[key] = tensor
+
+    for key in model_state.keys():
+        if key not in checkpoint_state:
+            missing_keys.append(key)
+
+    load_result = module.load_state_dict(matched_state, strict=False)
+
+    print(f"Partially loaded checkpoint weights from: {checkpoint_path}")
+    print(
+        "Checkpoint load summary: matched={}, missing={}, unexpected={}, shape_mismatched={}".format(
+            len(matched_state),
+            len(missing_keys),
+            len(unexpected_keys),
+            len(shape_mismatched_keys),
+        )
+    )
+    if missing_keys:
+        print("Warning: missing keys not loaded:")
+        for key in missing_keys:
+            print(f"  - {key}")
+    if unexpected_keys:
+        print("Warning: unexpected checkpoint keys skipped:")
+        for key in unexpected_keys:
+            print(f"  - {key}")
+    if shape_mismatched_keys:
+        print("Warning: shape-mismatched keys skipped:")
+        for key in shape_mismatched_keys:
+            print(f"  - {key}")
+    if getattr(load_result, "missing_keys", None):
+        print(f"Warning: PyTorch reported missing keys after partial load: {load_result.missing_keys}")
+    if getattr(load_result, "unexpected_keys", None):
+        print(f"Warning: PyTorch reported unexpected keys after partial load: {load_result.unexpected_keys}")
+
+    return {
+        "matched_keys": list(matched_state.keys()),
+        "missing_keys": missing_keys,
+        "unexpected_keys": unexpected_keys,
+        "shape_mismatched_keys": shape_mismatched_keys,
+    }
+
 def _parse_bool_from_train_log(log_path, key):
     if not os.path.isfile(log_path):
         return None
@@ -305,6 +382,7 @@ def get_args(test=False):
         {"name": "--debug", "action": "store_true", "default": False, "help": "Disable wandb logging"},
         {"name": "--proj_name", "type": str,  "default": "b1z1-low", "help": "run folder name."},
         {"name": "--resumeid", "type": str, "help": "exptid"},
+        {"name": "--load_exptid", "type": str, "help": "Checkpoint source exptid for load mode. Loads weights only and starts training from iteration 0."},
 
         {"name": "--no-headless", "action": "store_true", "help": "Enable viewer rendering"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},

@@ -38,7 +38,7 @@ from rsl_rl.env import VecEnv
 from rsl_rl.runners import OnPolicyRunner, OnPolicyRunnerHRL
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
-from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params, get_run_log_dir
+from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params, get_run_log_dir, load_matching_checkpoint_weights
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 from .logger import log_files
 
@@ -167,6 +167,9 @@ class TaskRegistry():
                                     device=args.rl_device)
         #save resume path before creating a new log_dir
         resume = train_cfg.runner.resume
+        load_exptid = getattr(args, "load_exptid", None)
+        load_only = bool(load_exptid) and not resume
+        resume_path = None
         if args.resumeid:
             log_root = get_run_log_dir(args.proj_name, args.resumeid)
             resume = True
@@ -181,9 +184,20 @@ class TaskRegistry():
             runner.set_it(checkpoint)
             if not train_cfg.policy.continue_from_last_std:
                 runner.alg.actor_critic.reset_std(train_cfg.policy.init_noise_std, 12, device=runner.device)
+        elif load_only:
+            load_root = get_run_log_dir(args.proj_name, load_exptid)
+            load_path = get_load_path(load_root, checkpoint=checkpoint)
+            print(f"Loading model weights from: {load_path}")
+            load_matching_checkpoint_weights(runner.alg.actor_critic, load_path, device=runner.device)
+            runner.set_it(0)
+            if not train_cfg.policy.continue_from_last_std:
+                runner.alg.actor_critic.reset_std(train_cfg.policy.init_noise_std, 12, device=runner.device)
+            if checkpoint == -1:
+                checkpoint = int(load_path.split("_")[-1].split(".")[0])
+            resume_path = load_path
 
         if "return_log_dir" in kwargs:
-            return runner, train_cfg, checkpoint, os.path.dirname(resume_path)
+            return runner, train_cfg, checkpoint, os.path.dirname(resume_path) if resume_path else log_dir
         else:    
             return runner, train_cfg, checkpoint
 

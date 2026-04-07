@@ -12,6 +12,9 @@ MAX_ITERATIONS="10"
 NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
+TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
+LOAD_EXPTID=""          # only used when TRAIN_MODE=load
+LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
 
 LOG_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
 LOG_FILE="${LOG_DIR}/train.log"
@@ -73,6 +76,9 @@ timestamp_log() {
   echo "OBSERVE_GAIT_COMMANDS=${OBSERVE_GAIT_COMMANDS}"
   echo "MIXED_HEIGHT_REFERENCE=${MIXED_HEIGHT_REFERENCE}"
   echo "TRUNK_FOLLOW_RATIO=${TRUNK_FOLLOW_RATIO:-<config>}"
+  echo "TRAIN_MODE=${TRAIN_MODE}"
+  echo "LOAD_EXPTID=${LOAD_EXPTID:-<none>}"
+  echo "LOAD_CKPT=${LOAD_CKPT}"
   echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
   echo "NUM_GPUS=${NUM_GPUS}"
   echo "DISTRIBUTED=${DISTRIBUTED}"
@@ -103,10 +109,31 @@ fi
   echo "LAUNCH_CMD=${LAUNCH_CMD[*]}"
 } | timestamp_log >> "${LOG_FILE}"
 
+TRAIN_MODE_ARGS=()
+case "${TRAIN_MODE}" in
+  fresh)
+    ;;
+  resume)
+    TRAIN_MODE_ARGS+=(--resume --resumeid "${EXPTID}")
+    ;;
+  load)
+    if [[ -z "${LOAD_EXPTID}" ]]; then
+      echo "LOAD_EXPTID must be set when TRAIN_MODE=load" | timestamp_log >> "${LOG_FILE}"
+      exit 1
+    fi
+    TRAIN_MODE_ARGS+=(--load_exptid "${LOAD_EXPTID}" --checkpoint "${LOAD_CKPT}")
+    ;;
+  *)
+    echo "Unsupported TRAIN_MODE=${TRAIN_MODE}. Expected one of: fresh, resume, load" | timestamp_log >> "${LOG_FILE}"
+    exit 1
+    ;;
+esac
+
 "${LAUNCH_CMD[@]}" \
   --proj_name "${PROJ_NAME}" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
+  "${TRAIN_MODE_ARGS[@]}" \
   $([[ "${OBSERVE_GAIT_COMMANDS}" == true ]] && echo --observe_gait_commands) \
   $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
