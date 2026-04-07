@@ -38,7 +38,7 @@ from rsl_rl.env import VecEnv
 from rsl_rl.runners import OnPolicyRunner, OnPolicyRunnerHRL
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
-from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params
+from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params, get_run_log_dir
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 from .logger import log_files
 
@@ -168,7 +168,7 @@ class TaskRegistry():
         #save resume path before creating a new log_dir
         resume = train_cfg.runner.resume
         if args.resumeid:
-            log_root = LEGGED_GYM_ROOT_DIR + "/logs/{}/".format(args.proj_name) + args.resumeid
+            log_root = get_run_log_dir(args.proj_name, args.resumeid)
             resume = True
         if resume:
             # load previously trained model

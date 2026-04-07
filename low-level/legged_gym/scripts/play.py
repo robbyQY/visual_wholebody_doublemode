@@ -34,7 +34,7 @@ import os
 import isaacgym
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
-from legged_gym.utils.helpers import get_load_path
+from legged_gym.utils.helpers import get_load_path, apply_checkpoint_features_from_run, get_run_log_dir
 
 import numpy as np
 import torch
@@ -44,7 +44,8 @@ import sys
 np.set_printoptions(precision=3, suppress=True)
 
 def play(args):
-    log_pth = LEGGED_GYM_ROOT_DIR + "/logs/{}/".format(args.proj_name) + args.exptid
+    log_pth = get_run_log_dir(args.proj_name, args.exptid)
+    args, _ = apply_checkpoint_features_from_run(args, log_pth)
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = 1

@@ -29,6 +29,9 @@ set -euo pipefail
 #   夹爪控制
 #     O / P : 张开0.05rad / 闭合0.05rad
 #
+#   mixed_height_reference模式控制（仅在该模式开启时生效）
+#     R / T : z-invariant模式 / trunk-follow模式
+#
 # 仿真器 / viewer 常用按键:
 #   ESC : 退出程序
 #   SPACE : 暂停/继续仿真
@@ -48,22 +51,21 @@ set -euo pipefail
 GPU_ID="1"
 ROOT_DIR="/workspace/visual_wholebody/low-level"
 SCRIPT_DIR="${ROOT_DIR}/legged_gym/scripts"
+LOG_ROOT="/data/logs"
 PROJ_NAME="b1z1-low"
-EXPTID="pretrained38000"
-CHECKPOINT="38000"
-SRC_CKPT="/data/model_${CHECKPOINT}.pt"
-DST_DIR="${ROOT_DIR}/logs/${PROJ_NAME}/${EXPTID}"
-DST_CKPT="${DST_DIR}/model_${CHECKPOINT}.pt"
+EXPTID="train_default"
+CHECKPOINT="45000"
+CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
+SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 
-USE_INTERFACE=false
+USE_INTERFACE=true
 HEADLESS=false
-OBSERVE_GAIT_COMMANDS=true
 TELEOP_MODE=true
+TELEOP_INPUT_REGULARIZATION=false
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
-mkdir -p "${DST_DIR}"
-cp -f "${SRC_CKPT}" "${DST_CKPT}"
+export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
 cd "${SCRIPT_DIR}"
 SCRIPT="play.py"
@@ -77,6 +79,6 @@ python "${SCRIPT}" \
   --sim_device "cuda:${GPU_ID}" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
-  $([[ "${OBSERVE_GAIT_COMMANDS}" == true ]] && echo --observe_gait_commands) \
   $([[ "${TELEOP_MODE}" == true ]] && echo --teleop_mode) \
+  $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)

@@ -36,9 +36,35 @@ import torch.distributed as dist
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from legged_gym.envs import *
-from legged_gym.utils import get_args, task_registry
+from legged_gym.utils import get_args, task_registry, class_to_dict
+from legged_gym.utils.helpers import save_run_metadata, get_run_log_dir
 import torch
 import wandb
+
+def _wandb_safe(obj):
+    if isinstance(obj, dict):
+        return {str(k): _wandb_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_wandb_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    return str(obj)
+
+def build_wandb_config(args, env_cfg, train_cfg, log_pth):
+    return _wandb_safe({
+        "cli_args": vars(args),
+        "env_cfg": class_to_dict(env_cfg),
+        "train_cfg": class_to_dict(train_cfg),
+        "runtime": {
+            "log_dir": log_pth,
+            "distributed": args.distributed,
+            "world_size": args.world_size,
+            "rank": args.rank,
+            "local_rank": args.local_rank,
+            "sim_device": args.sim_device,
+            "rl_device": args.rl_device,
+        },
+    })
 
 def setup_distributed(args):
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -63,7 +89,7 @@ def setup_distributed(args):
 
 def train(args):
     args = setup_distributed(args)
-    log_pth = LEGGED_GYM_ROOT_DIR + "/logs/{}/".format(args.proj_name) + args.exptid
+    log_pth = get_run_log_dir(args.proj_name, args.exptid)
     try:
         os.makedirs(log_pth)
     except:
@@ -78,12 +104,15 @@ def train(args):
     if args.rank != 0:
         mode = "disabled"
     wandb.init(project=args.proj_name, name=args.exptid, mode=mode, dir=LEGGED_GYM_ENVS_DIR +"/logs")
-    if args.rank == 0:
-        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/b1z1_config.py", policy="now")
-        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
 
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     ppo_runner, train_cfg, _ = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args)
+
+    if args.rank == 0:
+        save_run_metadata(log_pth, args, env_cfg, train_cfg)
+        wandb.config.update(build_wandb_config(args, env_cfg, train_cfg, log_pth), allow_val_change=True)
+        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/b1z1_config.py", policy="now")
+        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
     wandb.finish()
     if args.distributed and dist.is_initialized():

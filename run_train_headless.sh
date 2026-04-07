@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="/workspace/visual_wholebody"
 SCRIPT_DIR="${ROOT_DIR}/low-level/legged_gym/scripts"
+LOG_ROOT="/data/logs"
 
 PROJ_NAME="b1z1-low"
 EXPTID="train_default"
@@ -12,12 +13,14 @@ NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
 
-LOG_DIR="${ROOT_DIR}/low-level/logs/${PROJ_NAME}/${EXPTID}"
+LOG_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
 LOG_FILE="${LOG_DIR}/train.log"
 
-DISABLE_WANDB=true
+DISABLE_WANDB=false
+OBSERVE_GAIT_COMMANDS=true
 
 mkdir -p "${LOG_DIR}"
+export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
 if [[ "${DISABLE_WANDB}" == true ]]; then
   export WANDB_DISABLED=true
@@ -61,11 +64,13 @@ timestamp_log() {
   echo "PROJ_NAME=${PROJ_NAME}"
   echo "EXPTID=${EXPTID}"
   echo "TASK=${TASK}"
+  echo "LOG_ROOT=${LOG_ROOT}"
   echo "MAX_ITERATIONS=${MAX_ITERATIONS:-<default>}"
   echo "NUM_ENVS=${TOTAL_NUM_ENVS}"
   echo "LOG_DIR=${LOG_DIR}"
   echo "LOG_FILE=${LOG_FILE}"
   echo "DISABLE_WANDB=${DISABLE_WANDB}"
+  echo "OBSERVE_GAIT_COMMANDS=${OBSERVE_GAIT_COMMANDS}"
   echo "MIXED_HEIGHT_REFERENCE=${MIXED_HEIGHT_REFERENCE}"
   echo "TRUNK_FOLLOW_RATIO=${TRUNK_FOLLOW_RATIO:-<config>}"
   echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
@@ -102,6 +107,7 @@ fi
   --proj_name "${PROJ_NAME}" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
+  $([[ "${OBSERVE_GAIT_COMMANDS}" == true ]] && echo --observe_gait_commands) \
   $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
   $([[ -n "${NUM_ENVS}" ]] && echo --num_envs "${NUM_ENVS}") \

@@ -31,6 +31,8 @@
 import os
 import copy
 import sys
+import json
+import re
 import torch
 import numpy as np
 import random
@@ -38,6 +40,14 @@ from isaacgym import gymapi
 from isaacgym import gymutil
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
+
+RUN_METADATA_FILENAME = "run_metadata.json"
+
+def get_log_root():
+    return os.environ.get("LEGGED_GYM_LOG_ROOT", os.path.join(LEGGED_GYM_ROOT_DIR, "logs"))
+
+def get_run_log_dir(proj_name, exptid):
+    return os.path.join(get_log_root(), proj_name, exptid)
 
 def class_to_dict(obj) -> dict:
     if not  hasattr(obj,"__dict__"):
@@ -64,6 +74,101 @@ def update_class_from_dict(obj, dict):
         else:
             setattr(obj, key, val)
     return
+
+def _json_safe(obj):
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    return str(obj)
+
+def _extract_checkpoint_features(args, env_cfg):
+    observe_gait_commands = False
+    mixed_height_reference = False
+    if env_cfg is not None:
+        observe_gait_commands = bool(getattr(env_cfg.env, "observe_gait_commands", False))
+        mixed_height_reference = bool(getattr(env_cfg.goal_ee.sphere_center, "mixed_height_reference", False))
+    else:
+        observe_gait_commands = bool(getattr(args, "observe_gait_commands", False))
+        mixed_height_reference = bool(getattr(args, "mixed_height_reference", False))
+    return {
+        "observe_gait_commands": observe_gait_commands,
+        "mixed_height_reference": mixed_height_reference,
+    }
+
+def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None):
+    os.makedirs(log_dir, exist_ok=True)
+    metadata = {
+        "checkpoint_features": _extract_checkpoint_features(args, env_cfg),
+        "cli_args": _json_safe(vars(args)),
+    }
+    if env_cfg is not None:
+        metadata["env_cfg"] = _json_safe(class_to_dict(env_cfg))
+    if train_cfg is not None:
+        metadata["train_cfg"] = _json_safe(class_to_dict(train_cfg))
+
+    metadata_path = os.path.join(log_dir, RUN_METADATA_FILENAME)
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, sort_keys=True)
+    return metadata_path
+
+def _parse_bool_from_train_log(log_path, key):
+    if not os.path.isfile(log_path):
+        return None
+    pattern = re.compile(rf"{re.escape(key)}=(true|false)", re.IGNORECASE)
+    value = None
+    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                value = match.group(1).lower() == "true"
+    return value
+
+def load_run_metadata(log_dir):
+    metadata_path = os.path.join(log_dir, RUN_METADATA_FILENAME)
+    if os.path.isfile(metadata_path):
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["_source"] = metadata_path
+        return data
+
+    train_log_path = os.path.join(log_dir, "train.log")
+    checkpoint_features = {}
+    observe_gait_commands = _parse_bool_from_train_log(train_log_path, "OBSERVE_GAIT_COMMANDS")
+    mixed_height_reference = _parse_bool_from_train_log(train_log_path, "MIXED_HEIGHT_REFERENCE")
+    if observe_gait_commands is not None:
+        checkpoint_features["observe_gait_commands"] = observe_gait_commands
+    if mixed_height_reference is not None:
+        checkpoint_features["mixed_height_reference"] = mixed_height_reference
+    if checkpoint_features:
+        return {
+            "checkpoint_features": checkpoint_features,
+            "_source": train_log_path,
+        }
+    return None
+
+def apply_checkpoint_features_from_run(args, log_dir):
+    metadata = load_run_metadata(log_dir)
+    if metadata is None:
+        print(f"No run metadata found under: {log_dir}")
+        return args, None
+
+    checkpoint_features = metadata.get("checkpoint_features", {})
+    if "observe_gait_commands" in checkpoint_features:
+        args.observe_gait_commands = bool(checkpoint_features["observe_gait_commands"])
+    if "mixed_height_reference" in checkpoint_features:
+        args.mixed_height_reference = bool(checkpoint_features["mixed_height_reference"])
+
+    print(
+        "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}".format(
+            metadata.get("_source", "<unknown>"),
+            getattr(args, "observe_gait_commands", False),
+            getattr(args, "mixed_height_reference", False),
+        )
+    )
+    return args, metadata
 
 def set_seed(seed):
     if seed == -1:
