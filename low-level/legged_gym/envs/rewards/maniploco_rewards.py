@@ -317,7 +317,7 @@ class ManipLoco_rewards:
 
         reward = 0
         for i in range(4):
-            reward += - (1 - desired_contact[:, i]) * (
+            reward += (1 - desired_contact[:, i]) * (
                         1 - torch.exp(-1 * foot_forces[:, i] ** 2 / self.env.cfg.rewards.gait_force_sigma))
         
         # cmd_stop_flag = ~self.env._get_walking_cmd_mask()
@@ -331,8 +331,8 @@ class ManipLoco_rewards:
         desired_contact = self.env.desired_contact_states
         reward = 0
         for i in range(4):
-            reward += - (desired_contact[:, i] * (
-                        1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.cfg.rewards.gait_vel_sigma)))
+            reward += desired_contact[:, i] * (
+                        1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.cfg.rewards.gait_vel_sigma))
         # cmd_stop_flag = ~self.env._get_walking_cmd_mask()
         # reward[cmd_stop_flag] = 0
         
