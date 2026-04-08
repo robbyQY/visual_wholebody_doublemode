@@ -181,7 +181,6 @@ class TaskRegistry():
             runner.load(resume_path)
             if checkpoint == -1:
                 checkpoint = int(resume_path.split("_")[-1].split(".")[0])
-            runner.set_it(checkpoint)
             if not train_cfg.policy.continue_from_last_std:
                 runner.alg.actor_critic.reset_std(train_cfg.policy.init_noise_std, 12, device=runner.device)
         elif load_only:

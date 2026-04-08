@@ -230,6 +230,7 @@ class OnPolicyRunnerHRL:
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
+            'next_learning_iteration': self.current_learning_iteration,
             'infos': infos
         }, path)
         
@@ -238,7 +239,7 @@ class OnPolicyRunnerHRL:
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-        self.current_learning_iteration = loaded_dict['iter']
+        self.current_learning_iteration = loaded_dict.get('next_learning_iteration', loaded_dict['iter'])
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None, stochastic=False):

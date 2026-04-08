@@ -99,6 +99,8 @@ class OnPolicyRunner:
         
     def set_it(self, it):
         self.current_learning_iteration = it
+        if hasattr(self.alg, "counter"):
+            self.alg.counter = it
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # init metrics
@@ -183,12 +185,20 @@ class OnPolicyRunner:
             if self.log_dir is not None and self.is_main_process:
                 self.log(locals())
             if self.is_main_process and it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)), it)
+                self.save(
+                    os.path.join(self.log_dir, 'model_{}.pt'.format(it)),
+                    it,
+                    next_learning_iteration=it + 1,
+                )
             ep_infos.clear()
         
         self.current_learning_iteration += num_learning_iterations
         if self.is_main_process:
-            self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)), self.current_learning_iteration)
+            self.save(
+                os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)),
+                self.current_learning_iteration,
+                next_learning_iteration=self.current_learning_iteration,
+            )
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
@@ -287,11 +297,17 @@ class OnPolicyRunner:
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
         print(log_string)
 
-    def save(self, path, it, infos=None):
+    def save(self, path, it, infos=None, next_learning_iteration=None):
+        if next_learning_iteration is None:
+            next_learning_iteration = it
         torch.save({
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
+            'hist_encoder_optimizer_state_dict': self.alg.hist_encoder_optimizer.state_dict(),
             'iter': it,
+            'next_learning_iteration': next_learning_iteration,
+            'alg_counter': getattr(self.alg, 'counter', next_learning_iteration),
+            'learning_rate': getattr(self.alg, 'learning_rate', None),
             'infos': infos,
             }, path)
 
@@ -300,7 +316,18 @@ class OnPolicyRunner:
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-        self.current_learning_iteration = loaded_dict['iter']
+            if 'hist_encoder_optimizer_state_dict' in loaded_dict:
+                self.alg.hist_encoder_optimizer.load_state_dict(loaded_dict['hist_encoder_optimizer_state_dict'])
+            if 'learning_rate' in loaded_dict and loaded_dict['learning_rate'] is not None:
+                self.alg.learning_rate = loaded_dict['learning_rate']
+                for param_group in self.alg.optimizer.param_groups:
+                    param_group['lr'] = self.alg.learning_rate
+                for param_group in self.alg.hist_encoder_optimizer.param_groups:
+                    param_group['lr'] = self.alg.learning_rate
+        next_learning_iteration = loaded_dict.get('next_learning_iteration', loaded_dict['iter'])
+        self.current_learning_iteration = next_learning_iteration
+        if hasattr(self.alg, "counter"):
+            self.alg.counter = loaded_dict.get('alg_counter', next_learning_iteration)
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None, stochastic=False):
