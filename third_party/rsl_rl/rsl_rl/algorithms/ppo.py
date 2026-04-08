@@ -60,7 +60,7 @@ class PPO:
                  adaptive_arm_gains=True,
                  min_policy_std=None,
                  dagger_update_freq=20,
-                 priv_reg_coef_schedual = [0, 0, 0],
+                 priv_reg_coef_schedule = [0, 0, 0],
                  ):
 
         self.device = device
@@ -78,7 +78,7 @@ class PPO:
 
         # Adaptation
         self.hist_encoder_optimizer = optim.Adam(self.actor_critic.actor.history_encoder.parameters(), lr=learning_rate)
-        self.priv_reg_coef_schedual = priv_reg_coef_schedual
+        self.priv_reg_coef_schedule = priv_reg_coef_schedule
 
         # PPO parameters
         self.clip_param = clip_param
@@ -106,6 +106,31 @@ class PPO:
         self.distributed = False
         self.rank = 0
         self.world_size = 1
+
+    @staticmethod
+    def resolve_schedule_value(schedule, counter, default_duration=None):
+        if schedule is None:
+            return None
+        if isinstance(schedule, torch.Tensor):
+            schedule = schedule.detach().cpu().tolist()
+        schedule = list(schedule)
+        if len(schedule) == 0:
+            return None
+        if len(schedule) == 2:
+            start_value, end_value = schedule
+            start_iter = 0.0
+            duration = float(default_duration if default_duration is not None else 1.0)
+        elif len(schedule) == 3:
+            start_value = 0.0
+            end_value, start_iter, duration = schedule
+        elif len(schedule) == 4:
+            start_value, end_value, start_iter, duration = schedule
+        else:
+            raise ValueError(f"Unsupported schedule format: {schedule}")
+
+        duration = max(float(duration), 1.0)
+        progress = min(max((float(counter) - float(start_iter)) / duration, 0.0), 1.0)
+        return float(start_value) + (float(end_value) - float(start_value)) * progress
 
     def setup_distributed(self):
         self.distributed = dist.is_available() and dist.is_initialized()
@@ -207,9 +232,7 @@ class PPO:
                 with torch.inference_mode():
                     hist_latent_batch = self.actor_critic.actor.infer_hist_latent(obs_batch)
                 priv_reg_loss = (priv_latent_batch - hist_latent_batch.detach()).norm(p=2, dim=1).mean()
-                priv_reg_stage = min(max((self.counter - self.priv_reg_coef_schedual[2]), 0) / self.priv_reg_coef_schedual[3], 1)
-                priv_reg_coef = priv_reg_stage * (self.priv_reg_coef_schedual[1] - self.priv_reg_coef_schedual[0]) + self.priv_reg_coef_schedual[0]
-                # priv_reg_loss = torch.zeros(1, device=self.device)
+                priv_reg_coef = self.get_priv_reg_coef()
 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
@@ -352,7 +375,10 @@ class PPO:
         self.counter += 1
     
     def get_value_mixing_ratio(self):
-        return min(max((self.counter - self.mixing_schedule[1]) / self.mixing_schedule[2], 0), 1) * self.mixing_schedule[0]
+        return self.resolve_schedule_value(self.mixing_schedule, self.counter, default_duration=1.0) or 0.0
+
+    def get_priv_reg_coef(self):
+        return self.resolve_schedule_value(self.priv_reg_coef_schedule, self.counter, default_duration=1.0) or 0.0
     
     def get_torque_supervision_weight(self):
         return (1 - min(max((self.counter - self.torque_supervision_schedule[1]) / self.torque_supervision_schedule[2], 0), 1)) * self.torque_supervision_schedule[0]

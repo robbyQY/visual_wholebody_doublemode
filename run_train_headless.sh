@@ -13,6 +13,12 @@ NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
 OMNIDIRECTIONAL_POS_Y=false
+LIN_VEL_X_SCHEDULE=()
+ANG_VEL_YAW_SCHEDULE=()
+TRACKING_LIN_VEL_MAX_SCHEDULE=()
+TRACKING_ANG_VEL_SCHEDULE=()
+MIXING_SCHEDULE=()
+PRIV_REG_COEF_SCHEDULE=()
 TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
 LOAD_EXPTID=""          # only used when TRAIN_MODE=load
 LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
@@ -88,11 +94,32 @@ case "${TRAIN_MODE}" in
     ;;
 esac
 
+CURRICULUM_ARGS=()
+if (( ${#LIN_VEL_X_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--lin_vel_x_schedule "$(IFS=,; echo "${LIN_VEL_X_SCHEDULE[*]}")")
+fi
+if (( ${#ANG_VEL_YAW_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--ang_vel_yaw_schedule "$(IFS=,; echo "${ANG_VEL_YAW_SCHEDULE[*]}")")
+fi
+if (( ${#TRACKING_LIN_VEL_MAX_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--tracking_lin_vel_max_schedule "$(IFS=,; echo "${TRACKING_LIN_VEL_MAX_SCHEDULE[*]}")")
+fi
+if (( ${#TRACKING_ANG_VEL_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--tracking_ang_vel_schedule "$(IFS=,; echo "${TRACKING_ANG_VEL_SCHEDULE[*]}")")
+fi
+if (( ${#MIXING_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--mixing_schedule "$(IFS=,; echo "${MIXING_SCHEDULE[*]}")")
+fi
+if (( ${#PRIV_REG_COEF_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--priv_reg_coef_schedule "$(IFS=,; echo "${PRIV_REG_COEF_SCHEDULE[*]}")")
+fi
+
 "${LAUNCH_CMD[@]}" \
   --proj_name "${PROJ_NAME}" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
   "${TRAIN_MODE_ARGS[@]}" \
+  "${CURRICULUM_ARGS[@]}" \
   $([[ "${OBSERVE_GAIT_COMMANDS}" == true ]] && echo --observe_gait_commands) \
   $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \

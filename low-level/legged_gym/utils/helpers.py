@@ -93,6 +93,18 @@ def _json_safe(obj):
         return obj
     return str(obj)
 
+def _parse_schedule_arg(value):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return [float(v) for v in value]
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        if not parts:
+            return None
+        return [float(part) for part in parts]
+    return [float(value)]
+
 def _extract_checkpoint_features(args, env_cfg):
     observe_gait_commands = False
     mixed_height_reference = False
@@ -373,6 +385,18 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.goal_ee.sphere_center.trunk_follow_ratio = args.trunk_follow_ratio
         if args.omnidirectional_pos_y:
             env_cfg.goal_ee.ranges.omnidirectional_pos_y = True
+        lin_vel_x_schedule = _parse_schedule_arg(args.lin_vel_x_schedule)
+        if lin_vel_x_schedule is not None:
+            env_cfg.commands.lin_vel_x_schedule = lin_vel_x_schedule
+        ang_vel_yaw_schedule = _parse_schedule_arg(args.ang_vel_yaw_schedule)
+        if ang_vel_yaw_schedule is not None:
+            env_cfg.commands.ang_vel_yaw_schedule = ang_vel_yaw_schedule
+        tracking_lin_vel_max_schedule = _parse_schedule_arg(args.tracking_lin_vel_max_schedule)
+        if tracking_lin_vel_max_schedule is not None:
+            env_cfg.rewards.tracking_lin_vel_max_schedule = tracking_lin_vel_max_schedule
+        tracking_ang_vel_schedule = _parse_schedule_arg(args.tracking_ang_vel_schedule)
+        if tracking_ang_vel_schedule is not None:
+            env_cfg.rewards.tracking_ang_vel_schedule = tracking_ang_vel_schedule
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -389,6 +413,16 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.runner.load_run = args.load_run
         if args.checkpoint is not None:
             cfg_train.runner.checkpoint = args.checkpoint
+        mixing_schedule = _parse_schedule_arg(args.mixing_schedule)
+        if mixing_schedule is not None:
+            cfg_train.algorithm.mixing_schedule = mixing_schedule
+        priv_reg_coef_schedule = _parse_schedule_arg(args.priv_reg_coef_schedule)
+        if priv_reg_coef_schedule is not None:
+            cfg_train.algorithm.priv_reg_coef_schedule = priv_reg_coef_schedule
+        else:
+            priv_reg_coef_schedule_alias = _parse_schedule_arg(args.priv_reg_coef_schedual)
+            if priv_reg_coef_schedule_alias is not None:
+                cfg_train.algorithm.priv_reg_coef_schedule = priv_reg_coef_schedule_alias
 
     return env_cfg, cfg_train
 
@@ -442,6 +476,13 @@ def get_args(test=False):
         {"name": "--mixed_height_reference", "action": "store_true", "default": False, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
         {"name": "--omnidirectional_pos_y", "action": "store_true", "default": False, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
+        {"name": "--lin_vel_x_schedule", "type": str, "help": "Curriculum for |lin_vel_x| command range as comma-separated values: start,end or start,end,start_iter,duration."},
+        {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,duration."},
+        {"name": "--tracking_lin_vel_max_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_lin_vel_max as comma-separated values: start,end or start,end,start_iter,duration."},
+        {"name": "--tracking_ang_vel_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_ang_vel as comma-separated values: start,end or start,end,start_iter,duration."},
+        {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,duration or start,end,start_iter,duration."},
+        {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,duration."},
+        {"name": "--priv_reg_coef_schedual", "type": str, "help": "Deprecated alias for --priv_reg_coef_schedule."},
         
         {"name": "--rows", "type": int, "help": "num_rows."},
         {"name": "--cols", "type": int, "help": "num_cols"},

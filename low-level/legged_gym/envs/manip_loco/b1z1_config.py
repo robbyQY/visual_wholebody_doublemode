@@ -82,9 +82,9 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         num_commands = 3
         resampling_time = 3. # time before command are changed[s]
 
-        lin_vel_x_schedule = [0, 0.5]
-        ang_vel_yaw_schedule = [0, 1]
-        tracking_ang_vel_yaw_schedule = [0, 1]
+        # Command-range curricula
+        lin_vel_x_schedule = None
+        ang_vel_yaw_schedule = None
 
         ang_vel_yaw_clip = 0.5
         lin_vel_x_clip = 0.2
@@ -237,6 +237,9 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
 
         feet_aritime_allfeet = False
         feet_height_allfeet = False
+        # Reward-scale curricula
+        tracking_lin_vel_max_schedule = None
+        tracking_ang_vel_schedule = None
 
         # Scales set to 0 will still be logged (as zero reward and non-zero metric)
         # To not compute and log a given metric, set the scale to None
@@ -404,7 +407,7 @@ class B1Z1RoughCfgPPO(LeggedRobotCfgPPO):
         adaptive_arm_gains = B1Z1RoughCfg.control.adaptive_arm_gains
         # dagger params
         dagger_update_freq = 20
-        priv_reg_coef_schedual = [0, 0.1, 3000, 7000] #if not RESUME else [0, 1, 1000, 1000]
+        priv_reg_coef_schedule = [0, 0.1, 3000, 7000] #if not RESUME else [0, 1, 1000, 1000]
 
     class runner:
         policy_class_name = 'ActorCritic'
