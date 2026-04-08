@@ -96,15 +96,19 @@ def _json_safe(obj):
 def _extract_checkpoint_features(args, env_cfg):
     observe_gait_commands = False
     mixed_height_reference = False
+    omnidirectional_pos_y = False
     if env_cfg is not None:
         observe_gait_commands = bool(getattr(env_cfg.env, "observe_gait_commands", False))
         mixed_height_reference = bool(getattr(env_cfg.goal_ee.sphere_center, "mixed_height_reference", False))
+        omnidirectional_pos_y = bool(getattr(env_cfg.goal_ee.ranges, "omnidirectional_pos_y", False))
     else:
         observe_gait_commands = bool(getattr(args, "observe_gait_commands", False))
         mixed_height_reference = bool(getattr(args, "mixed_height_reference", False))
+        omnidirectional_pos_y = bool(getattr(args, "omnidirectional_pos_y", False))
     return {
         "observe_gait_commands": observe_gait_commands,
         "mixed_height_reference": mixed_height_reference,
+        "omnidirectional_pos_y": omnidirectional_pos_y,
     }
 
 def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
@@ -237,10 +241,13 @@ def load_run_metadata(log_dir, filename=None):
     checkpoint_features = {}
     observe_gait_commands = _parse_bool_from_train_log(train_log_path, "OBSERVE_GAIT_COMMANDS")
     mixed_height_reference = _parse_bool_from_train_log(train_log_path, "MIXED_HEIGHT_REFERENCE")
+    omnidirectional_pos_y = _parse_bool_from_train_log(train_log_path, "OMNIDIRECTIONAL_POS_Y")
     if observe_gait_commands is not None:
         checkpoint_features["observe_gait_commands"] = observe_gait_commands
     if mixed_height_reference is not None:
         checkpoint_features["mixed_height_reference"] = mixed_height_reference
+    if omnidirectional_pos_y is not None:
+        checkpoint_features["omnidirectional_pos_y"] = omnidirectional_pos_y
     if checkpoint_features:
         return {
             "checkpoint_features": checkpoint_features,
@@ -259,12 +266,15 @@ def apply_checkpoint_features_from_run(args, log_dir):
         args.observe_gait_commands = bool(checkpoint_features["observe_gait_commands"])
     if "mixed_height_reference" in checkpoint_features:
         args.mixed_height_reference = bool(checkpoint_features["mixed_height_reference"])
+    if "omnidirectional_pos_y" in checkpoint_features:
+        args.omnidirectional_pos_y = bool(checkpoint_features["omnidirectional_pos_y"])
 
     print(
-        "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}".format(
+        "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}".format(
             metadata.get("_source", "<unknown>"),
             getattr(args, "observe_gait_commands", False),
             getattr(args, "mixed_height_reference", False),
+            getattr(args, "omnidirectional_pos_y", False),
         )
     )
     return args, metadata
@@ -356,6 +366,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.goal_ee.sphere_center.mixed_height_reference = True
         if args.trunk_follow_ratio is not None:
             env_cfg.goal_ee.sphere_center.trunk_follow_ratio = args.trunk_follow_ratio
+        if args.omnidirectional_pos_y:
+            env_cfg.goal_ee.ranges.omnidirectional_pos_y = True
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -424,6 +436,7 @@ def get_args(test=False):
         {"name": "--vel_obs", "action": "store_true", "default": False,  "help": "Control Pitch"},
         {"name": "--mixed_height_reference", "action": "store_true", "default": False, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
+        {"name": "--omnidirectional_pos_y", "action": "store_true", "default": False, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
         
         {"name": "--rows", "type": int, "help": "num_rows."},
         {"name": "--cols", "type": int, "help": "num_cols"},

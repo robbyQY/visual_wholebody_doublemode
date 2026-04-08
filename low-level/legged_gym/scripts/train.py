@@ -198,8 +198,48 @@ def log_training_header(args, log_pth, num_gpus):
     print(f"NUM_GPUS={num_gpus}")
     print(f"DISTRIBUTED={distributed}")
     print(f"NUM_ENVS_PER_GPU={num_envs_per_gpu}")
+    print(f"OBSERVE_GAIT_COMMANDS={getattr(args, 'observe_gait_commands', False)}")
+    print(f"MIXED_HEIGHT_REFERENCE={getattr(args, 'mixed_height_reference', False)}")
+    print(f"TRUNK_FOLLOW_RATIO={getattr(args, 'trunk_follow_ratio', None)}")
+    print(f"OMNIDIRECTIONAL_POS_Y={getattr(args, 'omnidirectional_pos_y', False)}")
     print(f"START_TIME={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("")
+
+def validate_resume_checkpoint_features(args, log_pth):
+    metadata = load_run_metadata(log_pth, filename=getattr(args, "run_metadata_filename", None))
+    if metadata is None:
+        print(f"Warning: no run metadata found under {log_pth}; skip resume feature compatibility checks.")
+        return
+
+    checkpoint_features = metadata.get("checkpoint_features", {})
+    source = metadata.get("_source", "<unknown>")
+
+    strict_features = (
+        "observe_gait_commands",
+        "mixed_height_reference",
+    )
+    for feature_name in strict_features:
+        if feature_name not in checkpoint_features:
+            print(f"Warning: resume feature `{feature_name}` missing from {source}; skip compatibility check for it.")
+            continue
+        current_value = bool(getattr(args, feature_name, False))
+        previous_value = bool(checkpoint_features[feature_name])
+        assert current_value == previous_value, (
+            f"Resume feature mismatch for `{feature_name}`: current={current_value}, previous={previous_value} "
+            f"(from {source}). Update run_train_headless.sh or resume from a compatible run."
+        )
+
+    if "omnidirectional_pos_y" in checkpoint_features:
+        current_value = bool(getattr(args, "omnidirectional_pos_y", False))
+        previous_value = bool(checkpoint_features["omnidirectional_pos_y"])
+        if current_value != previous_value:
+            print(
+                "Warning: resume feature mismatch for `omnidirectional_pos_y`: "
+                f"current={current_value}, previous={previous_value} (from {source}). "
+                "Proceeding with the current configuration."
+            )
+    else:
+        print(f"Warning: resume feature `omnidirectional_pos_y` missing from {source}; proceeding with the current configuration.")
 
 def setup_distributed(args):
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -230,6 +270,8 @@ def train(args):
         sys.stdout = TimestampedTee(sys.stdout, args.log_file_path, args.rank)
         sys.stderr = TimestampedTee(sys.stderr, args.log_file_path, args.rank)
     log_training_header(args, log_pth, args.world_size if args.distributed else 1)
+    if getattr(args, "effective_train_mode", getattr(args, "train_mode", "fresh")) == "resume":
+        validate_resume_checkpoint_features(args, log_pth)
     if args.debug:
         mode = "disabled"
         args.rows = 6

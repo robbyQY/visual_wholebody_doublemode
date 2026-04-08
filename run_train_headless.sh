@@ -12,6 +12,7 @@ MAX_ITERATIONS="10"
 NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
+OMNIDIRECTIONAL_POS_Y=false
 TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
 LOAD_EXPTID=""          # only used when TRAIN_MODE=load
 LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
@@ -95,5 +96,6 @@ esac
   $([[ "${OBSERVE_GAIT_COMMANDS}" == true ]] && echo --observe_gait_commands) \
   $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
+  $([[ "${OMNIDIRECTIONAL_POS_Y}" == true ]] && echo --omnidirectional_pos_y) \
   $([[ -n "${NUM_ENVS}" ]] && echo --num_envs "${NUM_ENVS}") \
   $([[ -n "${MAX_ITERATIONS}" ]] && echo --max_iterations "${MAX_ITERATIONS}")
