@@ -40,7 +40,7 @@ import matplotlib.pyplot as plt
 from pydelatin import Delatin
 
 class Terrain_Perlin:
-    def __init__(self, cfg):
+    def __init__(self, cfg, verbose=True):
         self.cfg = cfg
         self.xSize = int(cfg.horizontal_scale * cfg.tot_cols)
         self.ySize = int(cfg.horizontal_scale * cfg.tot_rows)
@@ -50,8 +50,9 @@ class Terrain_Perlin:
         self.heightsamples_float = self.generate_fractal_noise_2d(self.xSize, self.ySize, self.tot_cols, self.tot_rows, zScale=cfg.zScale)
         # self.heightsamples_float[self.tot_cols//2 - 40: self.tot_cols//2 + 40, :] = np.mean(self.heightsamples_float)
         self.heightsamples = (self.heightsamples_float * (1 / cfg.vertical_scale)).astype(np.int16)
-        print("Terrain heightsamples shape: ", self.heightsamples.shape)
-        print("Terrain heightsamples stat: ", np.array([np.min(self.heightsamples), np.max(self.heightsamples), np.mean(self.heightsamples), np.std(self.heightsamples), np.median(self.heightsamples)]) * cfg.vertical_scale)
+        if verbose:
+            print("Terrain heightsamples shape: ", self.heightsamples.shape)
+            print("Terrain heightsamples stat: ", np.array([np.min(self.heightsamples), np.max(self.heightsamples), np.mean(self.heightsamples), np.std(self.heightsamples), np.median(self.heightsamples)]) * cfg.vertical_scale)
         # self.heightsamples = np.zeros((800, 800)).astype(np.int16)
         self.vertices, self.triangles = terrain_utils.convert_heightfield_to_trimesh(   self.heightsamples,
                                                                                         cfg.horizontal_scale,
@@ -98,7 +99,7 @@ class Terrain_Perlin:
         return noise
 
 class Terrain:
-    def __init__(self, cfg: LeggedRobotCfg.terrain) -> None:
+    def __init__(self, cfg: LeggedRobotCfg.terrain, verbose=True) -> None:
 
         self.cfg = cfg
         self.type = cfg.mesh_type
@@ -132,7 +133,8 @@ class Terrain:
         
         self.heightsamples = self.height_field_raw
         if self.type=="trimesh":
-            print("Converting heightmap to trimesh...")
+            if verbose:
+                print("Converting heightmap to trimesh...")
             if cfg.hf2mesh_method == "grid":
                 self.vertices, self.triangles = terrain_utils.convert_heightfield_to_trimesh(   self.height_field_raw,
                                                                                                 self.cfg.horizontal_scale,
@@ -141,8 +143,9 @@ class Terrain:
             else:
                 assert cfg.hf2mesh_method == "fast", "Height field to mesh method must be grid or fast"
                 self.vertices, self.triangles = convert_heightfield_to_trimesh_delatin(self.height_field_raw, self.cfg.horizontal_scale, self.cfg.vertical_scale, max_error=cfg.max_error)
-            print("Created {} vertices".format(self.vertices.shape[0]))
-            print("Created {} triangles".format(self.triangles.shape[0]))
+            if verbose:
+                print("Created {} vertices".format(self.vertices.shape[0]))
+                print("Created {} triangles".format(self.triangles.shape[0]))
 
     def randomized_terrain(self):
         for k in range(self.cfg.num_sub_terrains):

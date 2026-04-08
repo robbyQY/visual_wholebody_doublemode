@@ -37,6 +37,7 @@ from isaacgym import gymtorch, gymapi, gymutil
 from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_float
 
 import torch
+import torch.distributed as dist
 from typing import Tuple, Dict
 
 from legged_gym.envs.base.legged_robot import LeggedRobot
@@ -52,12 +53,14 @@ class ManipLoco(LeggedRobot):
     cfg: B1Z1RoughCfg
 
     def __init__(self, cfg, *args, **kwargs):
+        is_main_process = not (dist.is_available() and dist.is_initialized()) or dist.get_rank() == 0
         if cfg.goal_ee.sphere_center.mixed_height_reference:
             cfg.env.num_proprio += 1
             cfg.env.num_observations = cfg.env.num_proprio * (cfg.env.history_len+1) + cfg.env.num_priv
             self.num_obs = cfg.env.num_observations
         if cfg.env.observe_gait_commands:
-            print("||||||||||Observe gait commands!")
+            if is_main_process:
+                print("||||||||||Observe gait commands!")
             cfg.env.num_proprio += 5 # gait_indices=1, clock_phase=4
             cfg.env.num_observations = cfg.env.num_proprio * (cfg.env.history_len+1) + cfg.env.num_priv
             self.num_obs = cfg.env.num_observations
@@ -290,7 +293,7 @@ class ManipLoco(LeggedRobot):
         """
         self.up_axis_idx = 2 # 2 for z, 1 for y -> adapt gravity accordingly
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
-        self.terrain = Terrain(self.cfg.terrain, )
+        self.terrain = Terrain(self.cfg.terrain, verbose=self.is_main_process)
         self._create_trimesh()
         # self._create_ground_plane()
         self._create_envs()
@@ -430,7 +433,8 @@ class ManipLoco(LeggedRobot):
         plane_params.dynamic_friction = self.cfg.terrain.dynamic_friction
         plane_params.restitution = self.cfg.terrain.restitution
         self.gym.add_ground(self.sim, plane_params)
-        print("Added ground plane with friction: {}, restitution: {}".format(plane_params.static_friction, plane_params.restitution))
+        if self.is_main_process:
+            print("Added ground plane with friction: {}, restitution: {}".format(plane_params.static_friction, plane_params.restitution))
         return
     
     def _create_trimesh(self):
@@ -447,9 +451,11 @@ class ManipLoco(LeggedRobot):
         tm_params.static_friction = self.cfg.terrain.static_friction
         tm_params.dynamic_friction = self.cfg.terrain.dynamic_friction
         tm_params.restitution = self.cfg.terrain.restitution
-        print("Adding trimesh to simulation...")
+        if self.is_main_process:
+            print("Adding trimesh to simulation...")
         self.gym.add_triangle_mesh(self.sim, self.terrain.vertices.flatten(order='C'), self.terrain.triangles.flatten(order='C'), tm_params)  
-        print("Trimesh added")
+        if self.is_main_process:
+            print("Trimesh added")
         self.height_samples = torch.tensor(self.terrain.heightsamples).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
 
     def _create_envs(self):
@@ -527,15 +533,16 @@ class ManipLoco(LeggedRobot):
         asset_options.disable_gravity = False
         box_asset = self.gym.create_box(self.sim, self.cfg.box.box_size, self.cfg.box.box_size, self.cfg.box.box_size, asset_options)
 
-        print('------------------------------------------------------')
-        print('num_actions: {}'.format(self.num_actions))
-        print('num_torques: {}'.format(self.num_torques))
-        print('num_dofs: {}'.format(self.num_dofs))
-        print('num_bodies: {}'.format(self.num_bodies))
-        print('penalized_contact_names: {}'.format(penalized_contact_names))
-        print('termination_contact_names: {}'.format(termination_contact_names))
-        print('feet_names: {}'.format(feet_names))
-        print(f"EE Gripper index: {self.gripper_idx}")
+        if self.is_main_process:
+            print('------------------------------------------------------')
+            print('num_actions: {}'.format(self.num_actions))
+            print('num_torques: {}'.format(self.num_torques))
+            print('num_dofs: {}'.format(self.num_dofs))
+            print('num_bodies: {}'.format(self.num_bodies))
+            print('penalized_contact_names: {}'.format(penalized_contact_names))
+            print('termination_contact_names: {}'.format(termination_contact_names))
+            print('feet_names: {}'.format(feet_names))
+            print(f"EE Gripper index: {self.gripper_idx}")
 
         base_init_state_list = self.cfg.init_state.pos + self.cfg.init_state.rot + self.cfg.init_state.lin_vel + self.cfg.init_state.ang_vel
         self.base_init_state = to_torch(base_init_state_list, device=self.device, requires_grad=False)
@@ -624,9 +631,10 @@ class ManipLoco(LeggedRobot):
         for i in range(len(termination_contact_names)):
             self.termination_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], termination_contact_names[i])
         
-        print('penalized_contact_indices: {}'.format(self.penalized_contact_indices))
-        print('termination_contact_indices: {}'.format(self.termination_contact_indices))
-        print('feet_indices: {}'.format(self.feet_indices))
+        if self.is_main_process:
+            print('penalized_contact_indices: {}'.format(self.penalized_contact_indices))
+            print('termination_contact_indices: {}'.format(self.termination_contact_indices))
+            print('feet_indices: {}'.format(self.feet_indices))
 
         if self.record_video:
             camera_props = gymapi.CameraProperties()
@@ -817,17 +825,18 @@ class ManipLoco(LeggedRobot):
         
         self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
 
-        print('------------------------------------------------------')
-        print(f'root_states shape: {self.root_states.shape}')
-        print(f'dof_state shape: {self.dof_state.shape}')
-        print(f'force_sensor_tensor shape: {self.force_sensor_tensor.shape}')
-        print(f'contact_forces shape: {self.contact_forces.shape}')
-        print(f'rigid_body_state shape: {self.rigid_body_state.shape}')
-        print(f'jacobian_whole shape: {self.jacobian_whole.shape}')
-        print(f'box_root_state shape: {self.box_root_state.shape}')
-        print(f'box_contact_force shape: {self.box_contact_force.shape}')
-        print(f'box_rigid_body_state shape: {self.box_rigid_body_state.shape}')
-        print('------------------------------------------------------')
+        if self.is_main_process:
+            print('------------------------------------------------------')
+            print(f'root_states shape: {self.root_states.shape}')
+            print(f'dof_state shape: {self.dof_state.shape}')
+            print(f'force_sensor_tensor shape: {self.force_sensor_tensor.shape}')
+            print(f'contact_forces shape: {self.contact_forces.shape}')
+            print(f'rigid_body_state shape: {self.rigid_body_state.shape}')
+            print(f'jacobian_whole shape: {self.jacobian_whole.shape}')
+            print(f'box_root_state shape: {self.box_root_state.shape}')
+            print(f'box_contact_force shape: {self.box_contact_force.shape}')
+            print(f'box_rigid_body_state shape: {self.box_rigid_body_state.shape}')
+            print('------------------------------------------------------')
         
         # initialize some data used later on
         self.common_step_counter = 0

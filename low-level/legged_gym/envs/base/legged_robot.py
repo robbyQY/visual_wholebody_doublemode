@@ -234,7 +234,7 @@ class LeggedRobot(BaseTask):
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         mesh_type = self.cfg.terrain.mesh_type
         if mesh_type in ['heightfield', 'trimesh']:
-            self.terrain = Terrain(self.cfg.terrain)
+            self.terrain = Terrain(self.cfg.terrain, verbose=self.is_main_process)
         if mesh_type=='plane':
             self._create_ground_plane()
         elif mesh_type=='heightfield':
@@ -962,6 +962,3 @@ class LeggedRobot(BaseTask):
     def _reward_feet_contact_forces(self):
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
-
-
- 

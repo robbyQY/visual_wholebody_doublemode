@@ -172,7 +172,40 @@ def resolve_training_context(args):
 
     raise ValueError(f"Unsupported train_mode={train_mode}")
 
+def resolve_training_context_distributed(args):
+    if not getattr(args, "distributed", False) or not dist.is_initialized():
+        return resolve_training_context(args)
+
+    payload = [None]
+    if args.rank == 0:
+        args, log_dir = resolve_training_context(args)
+        os.makedirs(log_dir, exist_ok=True)
+        payload[0] = {
+            "log_dir": log_dir,
+            "requested_exptid": getattr(args, "requested_exptid", None),
+            "run_metadata_filename": getattr(args, "run_metadata_filename", "run_metadata.json"),
+            "log_file_path": getattr(args, "log_file_path", None),
+            "resume": getattr(args, "resume", False),
+            "resumeid": getattr(args, "resumeid", None),
+            "exptid": getattr(args, "exptid", None),
+            "effective_train_mode": getattr(args, "effective_train_mode", getattr(args, "train_mode", "fresh")),
+        }
+
+    dist.broadcast_object_list(payload, src=0)
+    context = payload[0]
+
+    args.requested_exptid = context["requested_exptid"]
+    args.run_metadata_filename = context["run_metadata_filename"]
+    args.log_file_path = context["log_file_path"]
+    args.resume = context["resume"]
+    args.resumeid = context["resumeid"]
+    args.exptid = context["exptid"]
+    args.effective_train_mode = context["effective_train_mode"]
+    return args, context["log_dir"]
+
 def log_training_header(args, log_pth, num_gpus):
+    if args.rank != 0:
+        return
     distributed = num_gpus > 1
     total_num_envs = args.num_envs if args.num_envs is not None else "<config>"
     if total_num_envs != "<config>" and num_gpus > 0:
@@ -206,6 +239,8 @@ def log_training_header(args, log_pth, num_gpus):
     print("")
 
 def validate_resume_checkpoint_features(args, log_pth):
+    if args.rank != 0:
+        return
     metadata = load_run_metadata(log_pth, filename=getattr(args, "run_metadata_filename", None))
     if metadata is None:
         print(f"Warning: no run metadata found under {log_pth}; skip resume feature compatibility checks.")
@@ -264,9 +299,9 @@ def setup_distributed(args):
 
 def train(args):
     args = setup_distributed(args)
-    args, log_pth = resolve_training_context(args)
+    args, log_pth = resolve_training_context_distributed(args)
     os.makedirs(log_pth, exist_ok=True)
-    if args.log_file_path:
+    if args.rank == 0 and args.log_file_path:
         sys.stdout = TimestampedTee(sys.stdout, args.log_file_path, args.rank)
         sys.stderr = TimestampedTee(sys.stderr, args.log_file_path, args.rank)
     log_training_header(args, log_pth, args.world_size if args.distributed else 1)

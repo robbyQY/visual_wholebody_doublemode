@@ -139,7 +139,7 @@ def update_run_metadata(log_dir, updates, filename=None):
         json.dump(metadata, f, indent=2, sort_keys=True)
     return metadata_path
 
-def load_matching_checkpoint_weights(module, checkpoint_path, device="cpu"):
+def load_matching_checkpoint_weights(module, checkpoint_path, device="cpu", verbose=True):
     loaded_obj = torch.load(checkpoint_path, map_location=device)
     if isinstance(loaded_obj, dict) and "model_state_dict" in loaded_obj:
         checkpoint_state = loaded_obj["model_state_dict"]
@@ -171,31 +171,32 @@ def load_matching_checkpoint_weights(module, checkpoint_path, device="cpu"):
 
     load_result = module.load_state_dict(matched_state, strict=False)
 
-    print(f"Partially loaded checkpoint weights from: {checkpoint_path}")
-    print(
-        "Checkpoint load summary: matched={}, missing={}, unexpected={}, shape_mismatched={}".format(
-            len(matched_state),
-            len(missing_keys),
-            len(unexpected_keys),
-            len(shape_mismatched_keys),
+    if verbose:
+        print(f"Partially loaded checkpoint weights from: {checkpoint_path}")
+        print(
+            "Checkpoint load summary: matched={}, missing={}, unexpected={}, shape_mismatched={}".format(
+                len(matched_state),
+                len(missing_keys),
+                len(unexpected_keys),
+                len(shape_mismatched_keys),
+            )
         )
-    )
-    if missing_keys:
-        print("Warning: missing keys not loaded:")
-        for key in missing_keys:
-            print(f"  - {key}")
-    if unexpected_keys:
-        print("Warning: unexpected checkpoint keys skipped:")
-        for key in unexpected_keys:
-            print(f"  - {key}")
-    if shape_mismatched_keys:
-        print("Warning: shape-mismatched keys skipped:")
-        for key in shape_mismatched_keys:
-            print(f"  - {key}")
-    if getattr(load_result, "missing_keys", None):
-        print(f"Warning: PyTorch reported missing keys after partial load: {load_result.missing_keys}")
-    if getattr(load_result, "unexpected_keys", None):
-        print(f"Warning: PyTorch reported unexpected keys after partial load: {load_result.unexpected_keys}")
+        if missing_keys:
+            print("Warning: missing keys not loaded:")
+            for key in missing_keys:
+                print(f"  - {key}")
+        if unexpected_keys:
+            print("Warning: unexpected checkpoint keys skipped:")
+            for key in unexpected_keys:
+                print(f"  - {key}")
+        if shape_mismatched_keys:
+            print("Warning: shape-mismatched keys skipped:")
+            for key in shape_mismatched_keys:
+                print(f"  - {key}")
+        if getattr(load_result, "missing_keys", None):
+            print(f"Warning: PyTorch reported missing keys after partial load: {load_result.missing_keys}")
+        if getattr(load_result, "unexpected_keys", None):
+            print(f"Warning: PyTorch reported unexpected keys after partial load: {load_result.unexpected_keys}")
 
     return {
         "matched_keys": list(matched_state.keys()),
@@ -255,10 +256,11 @@ def load_run_metadata(log_dir, filename=None):
         }
     return None
 
-def apply_checkpoint_features_from_run(args, log_dir):
+def apply_checkpoint_features_from_run(args, log_dir, verbose=True):
     metadata = load_run_metadata(log_dir)
     if metadata is None:
-        print(f"No run metadata found under: {log_dir}")
+        if verbose:
+            print(f"No run metadata found under: {log_dir}")
         return args, None
 
     checkpoint_features = metadata.get("checkpoint_features", {})
@@ -269,20 +271,22 @@ def apply_checkpoint_features_from_run(args, log_dir):
     if "omnidirectional_pos_y" in checkpoint_features:
         args.omnidirectional_pos_y = bool(checkpoint_features["omnidirectional_pos_y"])
 
-    print(
-        "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}".format(
-            metadata.get("_source", "<unknown>"),
-            getattr(args, "observe_gait_commands", False),
-            getattr(args, "mixed_height_reference", False),
-            getattr(args, "omnidirectional_pos_y", False),
+    if verbose:
+        print(
+            "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}".format(
+                metadata.get("_source", "<unknown>"),
+                getattr(args, "observe_gait_commands", False),
+                getattr(args, "mixed_height_reference", False),
+                getattr(args, "omnidirectional_pos_y", False),
+            )
         )
-    )
     return args, metadata
 
-def set_seed(seed):
+def set_seed(seed, verbose=True):
     if seed == -1:
         seed = np.random.randint(0, 10000)
-    print("Setting seed: {}".format(seed))
+    if verbose:
+        print("Setting seed: {}".format(seed))
     
     random.seed(seed)
     np.random.seed(seed)
@@ -299,7 +303,8 @@ def parse_sim_params(args, cfg):
     # set some values from args
     if args.physics_engine == gymapi.SIM_FLEX:
         if args.device != "cpu":
-            print("WARNING: Using Flex with GPU instead of PHYSX!")
+            if getattr(args, "rank", 0) == 0:
+                print("WARNING: Using Flex with GPU instead of PHYSX!")
     elif args.physics_engine == gymapi.SIM_PHYSX:
         sim_params.physx.use_gpu = args.use_gpu
         sim_params.physx.num_subscenes = args.subscenes

@@ -104,7 +104,7 @@ class TaskRegistry():
             env_cfg.env.num_envs //= world_size
         distributed_rank = getattr(args, "rank", 0)
         env_cfg.seed += distributed_rank
-        set_seed(env_cfg.seed)
+        set_seed(env_cfg.seed, verbose=getattr(args, "rank", 0) == 0)
         # parse sim params (convert to dict first)
         sim_params = {"sim": class_to_dict(env_cfg.sim)}
         sim_params = parse_sim_params(args, sim_params)
@@ -175,9 +175,11 @@ class TaskRegistry():
             resume = True
         if resume:
             # load previously trained model
-            print(log_root)
+            if getattr(args, "rank", 0) == 0:
+                print(log_root)
             resume_path = get_load_path(log_root, checkpoint=checkpoint)
-            print(f"Loading model from: {resume_path}")
+            if getattr(args, "rank", 0) == 0:
+                print(f"Loading model from: {resume_path}")
             runner.load(resume_path)
             if checkpoint == -1:
                 checkpoint = int(resume_path.split("_")[-1].split(".")[0])
@@ -186,8 +188,14 @@ class TaskRegistry():
         elif load_only:
             load_root = get_run_log_dir(args.proj_name, load_exptid)
             load_path = get_load_path(load_root, checkpoint=checkpoint)
-            print(f"Loading model weights from: {load_path}")
-            load_matching_checkpoint_weights(runner.alg.actor_critic, load_path, device=runner.device)
+            if getattr(args, "rank", 0) == 0:
+                print(f"Loading model weights from: {load_path}")
+            load_matching_checkpoint_weights(
+                runner.alg.actor_critic,
+                load_path,
+                device=runner.device,
+                verbose=getattr(args, "rank", 0) == 0,
+            )
             runner.set_it(0)
             if not train_cfg.policy.continue_from_last_std:
                 runner.alg.actor_critic.reset_std(train_cfg.policy.init_noise_std, 12, device=runner.device)

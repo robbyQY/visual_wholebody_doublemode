@@ -34,12 +34,16 @@ from isaacgym import gymutil
 import numpy as np
 import torch
 import time
+import torch.distributed as dist
 
 # Base class for RL tasks
 class BaseTask():
 
     def __init__(self, cfg, sim_params, physics_engine, sim_device, headless):
         self.gym = gymapi.acquire_gym()
+        self.distributed = dist.is_available() and dist.is_initialized()
+        self.rank = dist.get_rank() if self.distributed else 0
+        self.is_main_process = self.rank == 0
 
         self.sim_params = sim_params
         self.physics_engine = physics_engine

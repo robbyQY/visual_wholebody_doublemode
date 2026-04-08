@@ -33,6 +33,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+import torch.distributed as dist
 from torch.nn.modules import rnn
 
 # History Encoder
@@ -291,8 +292,9 @@ class ActorCritic(nn.Module):
                              num_priv, num_hist, num_prop)
 
 
-        print(f"Actor MLP: {self.actor}")
-        print(f"Critic MLP: {self.critic}")
+        if not (dist.is_available() and dist.is_initialized()) or dist.get_rank() == 0:
+            print(f"Actor MLP: {self.actor}")
+            print(f"Critic MLP: {self.critic}")
 
         # Action noise
         self.std = nn.Parameter(torch.tensor(init_std))
