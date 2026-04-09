@@ -62,6 +62,7 @@ USE_INTERFACE=true
 HEADLESS=false
 TELEOP_MODE=true
 TELEOP_INPUT_REGULARIZATION=false
+ACTION_DELAY_MODE="auto"  # auto: keep training curriculum, undelayed: latest action, delayed: one-step delayed action
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
@@ -81,4 +82,5 @@ python "${SCRIPT}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
   $([[ "${TELEOP_MODE}" == true ]] && echo --teleop_mode) \
   $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
+  --action_delay_mode "${ACTION_DELAY_MODE}" \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)

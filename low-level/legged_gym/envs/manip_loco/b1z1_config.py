@@ -108,6 +108,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         num_actions = 12 + 6 #CAUTION
         num_torques = 12 + 6
         action_delay = 3  # -1 for no delay
+        action_delay_mode = "auto"  # auto: keep training curriculum, undelayed: latest action, delayed: one-step delayed action
         num_gripper_joints = 1
         num_proprio = 2 + 3 + 18 + 18 + 12 + 4 + 3 + 3 + 3 
         num_priv = 5 + 1 + 12
