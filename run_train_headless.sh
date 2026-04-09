@@ -13,6 +13,7 @@ NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
 OMNIDIRECTIONAL_POS_Y=false
+EE_GOAL_OBS_MODE="command"  # command | arm_base_target
 LIN_VEL_X_MIN_SCHEDULE=()
 LIN_VEL_X_MAX_SCHEDULE=()
 ANG_VEL_YAW_SCHEDULE=()
@@ -128,5 +129,6 @@ fi
   $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
   $([[ "${OMNIDIRECTIONAL_POS_Y}" == true ]] && echo --omnidirectional_pos_y) \
+  --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}" \
   $([[ -n "${NUM_ENVS}" ]] && echo --num_envs "${NUM_ENVS}") \
   $([[ -n "${MAX_ITERATIONS}" ]] && echo --max_iterations "${MAX_ITERATIONS}")

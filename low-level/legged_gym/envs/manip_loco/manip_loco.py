@@ -231,11 +231,18 @@ class ManipLoco(LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
-        # Feed the end-effector command in the moving height-invariant root frame
-        # used by goal sampling, matching the paper's command definition.
-        ee_goal_local_cart = self.curr_ee_goal_cart
         if self.cfg.env.teleop_mode:
             self._update_effective_teleop_inputs()
+        ee_goal_obs_mode = getattr(self.cfg.env, "ee_goal_obs_mode", "command")
+        if ee_goal_obs_mode == "command":
+            # Match the goal-sampling command semantics used by newer checkpoints.
+            ee_goal_local_cart = self.curr_ee_goal_cart
+        elif ee_goal_obs_mode == "arm_base_target":
+            # Legacy checkpoints observed the world target relative to the arm base.
+            arm_base_pos = self.base_pos + quat_apply(self.base_yaw_quat, self.arm_base_offset)
+            ee_goal_local_cart = quat_rotate_inverse(self.base_quat, self.curr_ee_goal_cart_world - arm_base_pos)
+        else:
+            raise ValueError(f"Unsupported ee_goal_obs_mode: {ee_goal_obs_mode}")
         if self.stand_by:
             self.commands[:] = 0.
 

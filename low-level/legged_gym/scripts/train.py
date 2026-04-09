@@ -235,6 +235,7 @@ def log_training_header(args, log_pth, num_gpus):
     print(f"MIXED_HEIGHT_REFERENCE={getattr(args, 'mixed_height_reference', False)}")
     print(f"TRUNK_FOLLOW_RATIO={getattr(args, 'trunk_follow_ratio', None)}")
     print(f"OMNIDIRECTIONAL_POS_Y={getattr(args, 'omnidirectional_pos_y', False)}")
+    print(f"EE_GOAL_OBS_MODE={getattr(args, 'ee_goal_obs_mode', 'command')}")
     print(f"START_TIME={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("")
 
@@ -252,13 +253,18 @@ def validate_resume_checkpoint_features(args, log_pth):
     strict_features = (
         "observe_gait_commands",
         "mixed_height_reference",
+        "ee_goal_obs_mode",
     )
     for feature_name in strict_features:
         if feature_name not in checkpoint_features:
             print(f"Warning: resume feature `{feature_name}` missing from {source}; skip compatibility check for it.")
             continue
-        current_value = bool(getattr(args, feature_name, False))
-        previous_value = bool(checkpoint_features[feature_name])
+        if feature_name == "ee_goal_obs_mode":
+            current_value = str(getattr(args, feature_name, "command"))
+            previous_value = str(checkpoint_features[feature_name])
+        else:
+            current_value = bool(getattr(args, feature_name, False))
+            previous_value = bool(checkpoint_features[feature_name])
         assert current_value == previous_value, (
             f"Resume feature mismatch for `{feature_name}`: current={current_value}, previous={previous_value} "
             f"(from {source}). Update run_train_headless.sh or resume from a compatible run."

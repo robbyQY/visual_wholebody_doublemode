@@ -63,6 +63,7 @@ HEADLESS=false
 TELEOP_MODE=true
 TELEOP_INPUT_REGULARIZATION=false
 ACTION_DELAY_MODE="auto"  # auto: keep training curriculum, undelayed: latest action, delayed: one-step delayed action
+EE_GOAL_OBS_MODE="command"  # command | arm_base_target
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
@@ -83,4 +84,5 @@ python "${SCRIPT}" \
   $([[ "${TELEOP_MODE}" == true ]] && echo --teleop_mode) \
   $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
+  --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}" \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)

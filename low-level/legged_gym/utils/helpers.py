@@ -109,18 +109,22 @@ def _extract_checkpoint_features(args, env_cfg):
     observe_gait_commands = False
     mixed_height_reference = False
     omnidirectional_pos_y = False
+    ee_goal_obs_mode = "command"
     if env_cfg is not None:
         observe_gait_commands = bool(getattr(env_cfg.env, "observe_gait_commands", False))
         mixed_height_reference = bool(getattr(env_cfg.goal_ee.sphere_center, "mixed_height_reference", False))
         omnidirectional_pos_y = bool(getattr(env_cfg.goal_ee.ranges, "omnidirectional_pos_y", False))
+        ee_goal_obs_mode = str(getattr(env_cfg.env, "ee_goal_obs_mode", "command"))
     else:
         observe_gait_commands = bool(getattr(args, "observe_gait_commands", False))
         mixed_height_reference = bool(getattr(args, "mixed_height_reference", False))
         omnidirectional_pos_y = bool(getattr(args, "omnidirectional_pos_y", False))
+        ee_goal_obs_mode = str(getattr(args, "ee_goal_obs_mode", "command"))
     return {
         "observe_gait_commands": observe_gait_commands,
         "mixed_height_reference": mixed_height_reference,
         "omnidirectional_pos_y": omnidirectional_pos_y,
+        "ee_goal_obs_mode": ee_goal_obs_mode,
     }
 
 def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
@@ -255,12 +259,22 @@ def load_run_metadata(log_dir, filename=None):
     observe_gait_commands = _parse_bool_from_train_log(train_log_path, "OBSERVE_GAIT_COMMANDS")
     mixed_height_reference = _parse_bool_from_train_log(train_log_path, "MIXED_HEIGHT_REFERENCE")
     omnidirectional_pos_y = _parse_bool_from_train_log(train_log_path, "OMNIDIRECTIONAL_POS_Y")
+    ee_goal_obs_mode = None
+    if os.path.isfile(train_log_path):
+        pattern = re.compile(r"EE_GOAL_OBS_MODE=([A-Za-z0-9_\-]+)")
+        with open(train_log_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    ee_goal_obs_mode = match.group(1)
     if observe_gait_commands is not None:
         checkpoint_features["observe_gait_commands"] = observe_gait_commands
     if mixed_height_reference is not None:
         checkpoint_features["mixed_height_reference"] = mixed_height_reference
     if omnidirectional_pos_y is not None:
         checkpoint_features["omnidirectional_pos_y"] = omnidirectional_pos_y
+    if ee_goal_obs_mode is not None:
+        checkpoint_features["ee_goal_obs_mode"] = ee_goal_obs_mode
     if checkpoint_features:
         return {
             "checkpoint_features": checkpoint_features,
@@ -282,14 +296,17 @@ def apply_checkpoint_features_from_run(args, log_dir, verbose=True):
         args.mixed_height_reference = bool(checkpoint_features["mixed_height_reference"])
     if "omnidirectional_pos_y" in checkpoint_features:
         args.omnidirectional_pos_y = bool(checkpoint_features["omnidirectional_pos_y"])
+    if "ee_goal_obs_mode" in checkpoint_features:
+        args.ee_goal_obs_mode = str(checkpoint_features["ee_goal_obs_mode"])
 
     if verbose:
         print(
-            "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}".format(
+            "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}, ee_goal_obs_mode={}".format(
                 metadata.get("_source", "<unknown>"),
                 getattr(args, "observe_gait_commands", False),
                 getattr(args, "mixed_height_reference", False),
                 getattr(args, "omnidirectional_pos_y", False),
+                getattr(args, "ee_goal_obs_mode", "command"),
             )
         )
     return args, metadata
@@ -374,6 +391,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.teleop_input_regularization = True
         if args.action_delay_mode is not None:
             env_cfg.env.action_delay_mode = args.action_delay_mode
+        if args.ee_goal_obs_mode is not None:
+            env_cfg.env.ee_goal_obs_mode = args.ee_goal_obs_mode
         if args.record_video:
             env_cfg.env.record_video = args.record_video
         if args.stand_by:
@@ -475,6 +494,7 @@ def get_args(test=False):
         {"name": "--teleop_mode", "action": "store_true", "default": False,  "help": "Enable keyboard teleoperation mode"},
         {"name": "--teleop_input_regularization", "action": "store_true", "default": False, "help": "Preprocess teleop raw commands and arm targets before feeding the policy/control stack"},
         {"name": "--action_delay_mode", "type": str, "choices": ["auto", "undelayed", "delayed"], "help": "Action delay mode for play/teleop: auto keeps the training switch, undelayed always uses the latest action, delayed always uses a one-step delayed action."},
+        {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "default": "command", "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
         {"name": "--stand_by", "action": "store_true", "default": False,  "help": "Stand by to play"},
         {"name": "--flat_terrain", "action": "store_true", "default": False,  "help": "Flat the terrain"},
         {"name": "--pitch_control", "action": "store_true", "default": False,  "help": "Control Pitch"},
