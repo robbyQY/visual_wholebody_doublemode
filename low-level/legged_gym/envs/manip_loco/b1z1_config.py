@@ -248,48 +248,48 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             feet_air_time = 2.0
             feet_height = 1.0
 
-            # -------Tracking rewards ----------
-            tracking_lin_vel_max = 2.0 
-            tracking_lin_vel_x_l1 = 0.
-            tracking_lin_vel_x_exp = 0
+            # -------Command tracking rewards ---------
+            tracking_lin_vel_max = 2.0
+            tracking_lin_vel_x_l1 = 0.0
+            tracking_lin_vel_x_exp = 0.0
             tracking_ang_vel = 0.5
+            penalty_lin_vel_y = 0.0
 
-            delta_torques = -1.0e-7/4.0
-            work = 0
-            energy_square = 0.0
-            torques = -2.5e-5 
-            stand_still = 1.0 
+            # -------Posture and task rewards ---------
+            stand_still = 1.0
             walking_dof = 1.5
-            dof_default_pos = 0.0
-            dof_error = 0.0 
             alive = 1.0
             lin_vel_z = -1.5
             roll = -2
-
-            # common rewards
-            ang_vel_xy = -0.2 
-            dof_acc = -7.5e-7 
-            collision = -10.
-            action_rate = -0.015
-            dof_pos_limits = -10.0
-            delta_torques = -1.0e-7
             hip_pos = -0.3
-            work = -0.003
-            feet_jerk = -0.0002
-            feet_drag = -0.08
-            feet_contact_forces = -0.001
+            base_height = -5.0
+            base_height_walking = 0.0
+            base_height_standing = 0.0
+            dof_default_pos = 0.0
+            dof_error = 0.0
             orientation = 0.0
             orientation_walking = 0.0
             orientation_standing = 0.0
-            base_height = -5.0
+
+            # -------Smoothness and effort penalties ---------
+            action_rate = -0.015
+            dof_acc = -7.5e-7
+            dof_pos_limits = -10.0
+            delta_torques = -1.0e-7 / 4.0
+            torques = -2.5e-5
             torques_walking = 0.0
             torques_standing = 0.0
+            work = 0.0
             energy_square = 0.0
             energy_square_walking = 0.0
             energy_square_standing = 0.0
-            base_height_walking = 0.0
-            base_height_standing = 0.0
-            penalty_lin_vel_y = 0.
+
+            # -------Contact and motion penalties ---------
+            ang_vel_xy = -0.2
+            collision = -10.
+            feet_jerk = -0.0002
+            feet_drag = -0.08
+            feet_contact_forces = -0.001
 
         class arm_scales:
             arm_termination = None
