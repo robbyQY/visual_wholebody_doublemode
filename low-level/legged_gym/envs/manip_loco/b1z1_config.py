@@ -232,6 +232,8 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         gait_vel_sigma = 0.5
         gait_force_sigma = 0.5
         kappa_gait_probs = 0.07
+        gait_transition_lower = 0.1
+        gait_transition_upper = 0.9
         feet_height_target = 0.3
 
         feet_aritime_allfeet = False
@@ -240,69 +242,68 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         tracking_lin_vel_max_schedule = None
         tracking_ang_vel_schedule = None
 
-        # Scales set to 0 will still be logged (as zero reward and non-zero metric)
-        # To not compute and log a given metric, set the scale to None
+        # Scales set to 0 or None will both be skipped in the current reward setup
+        # Disabled terms are neither computed nor logged as reward metrics
         class scales:
             # -------Gait control rewards ---------
-            tracking_contacts_shaped_force = -2.0 # Only works when `observing_gait_commands` is true
-            tracking_contacts_shaped_vel = -2.0 # Only works when `observing_gait_commands` is true
-            feet_air_time = 2.0
-            feet_height = 1.0
+            tracking_contacts_shaped_force = -2.0 # 惩罚摆动足触地力过大
+            tracking_contacts_shaped_vel = -2.0 # 惩罚支撑足滑动过快
+            feet_air_time = 2.0 # 奖励迈步腾空更久
+            feet_height = 1.0 # 惩罚摆腿抬脚不足
 
             # -------Command tracking rewards ---------
-            tracking_lin_vel_max = 2.0
-            tracking_lin_vel_x_l1 = 0.0
-            tracking_lin_vel_x_exp = 0.0
-            tracking_ang_vel = 0.5
-            penalty_lin_vel_y = 0.0
+            tracking_lin_vel_max = 2.0 # 奖励前向速度跟踪
+            tracking_lin_vel_x_l1 = 0.0 # 奖励前向速度贴近命令
+            tracking_lin_vel_x_exp = 0.0 # 奖励前向速度指数跟踪
+            tracking_ang_vel = 0.5 # 奖励偏航角速度跟踪
+            penalty_lin_vel_y = 0.0 # 惩罚侧向漂移速度
 
             # -------Posture and task rewards ---------
-            stand_still = 1.0
-            walking_dof = 1.5
-            alive = 1.0
-            lin_vel_z = -1.5
-            roll = -2
-            hip_pos = -0.3
-            base_height = -5.0
-            base_height_walking = 0.0
-            base_height_standing = 0.0
-            dof_default_pos = 0.0
-            dof_error = 0.0
-            orientation = 0.0
-            orientation_walking = 0.0
-            orientation_standing = 0.0
+            stand_still = 1.0 # 奖励静止时站稳
+            walking_dof = 1.5 # 奖励行走时关节规整
+            alive = 1.0 # 奖励回合持续存活
+            lin_vel_z = -1.5 # 惩罚机身上下晃动
+            roll = -2 # 惩罚机身横滚倾斜
+            hip_pos = -0.3 # 惩罚髋关节偏离默认
+            base_height = -5.0 # 惩罚机身高度偏差
+            base_height_walking = 0.0 # 惩罚行走时机身高度偏差
+            base_height_standing = 0.0 # 惩罚站立时机身高度偏差
+            dof_default_pos = 0.0 # 奖励关节贴近默认位
+            dof_error = 0.0 # 惩罚关节默认位误差
+            orientation = 0.0 # 惩罚机身姿态倾斜
+            orientation_walking = 0.0 # 惩罚行走时姿态倾斜
+            orientation_standing = 0.0 # 惩罚站立时姿态倾斜
 
             # -------Smoothness and effort penalties ---------
-            action_rate = -0.015
-            dof_acc = -7.5e-7
-            dof_pos_limits = -10.0
-            delta_torques = -1.0e-7 / 4.0
-            torques = -2.5e-5
-            torques_walking = 0.0
-            torques_standing = 0.0
-            work = 0.0
-            energy_square = 0.0
-            energy_square_walking = 0.0
-            energy_square_standing = 0.0
+            action_rate = -0.015 # 惩罚动作变化过快
+            dof_acc = -7.5e-7 # 惩罚关节加速度过大
+            dof_pos_limits = -10.0 # 惩罚关节逼近限位
+            delta_torques = -1.0e-7 / 4.0 # 惩罚扭矩突变过大
+            torques = -2.5e-5 # 惩罚关节扭矩过大
+            torques_walking = 0.0 # 惩罚行走时扭矩过大
+            torques_standing = 0.0 # 惩罚站立时扭矩过大
+            work = 0.0 # 惩罚腿部净做功大
+            energy_square = 0.0 # 惩罚腿部平方能耗
+            energy_square_walking = 0.0 # 惩罚行走时平方能耗
+            energy_square_standing = 0.0 # 惩罚站立时平方能耗
 
             # -------Contact and motion penalties ---------
-            ang_vel_xy = -0.2
-            collision = -10.
-            feet_jerk = -0.0002
-            feet_drag = -0.08
-            feet_contact_forces = -0.001
+            ang_vel_xy = -0.2 # 惩罚机身横俯角速度
+            collision = -10. # 惩罚机身发生碰撞
+            feet_jerk = -0.0002 # 惩罚足端冲击突变
+            feet_drag = -0.08 # 惩罚足端拖地滑动
+            feet_contact_forces = -0.001 # 惩罚足端接触力过大
 
         class arm_scales:
-            arm_termination = None
-            tracking_ee_sphere = 0.
-            tracking_ee_world = 0.8
-            tracking_ee_sphere_walking = 0.0
-            tracking_ee_sphere_standing = 0.0
-            tracking_ee_cart = None
-            arm_orientation = None
-            arm_energy_abs_sum = None
-            tracking_ee_orn = 0.
-            tracking_ee_orn_ry = None
+            arm_termination = None # 惩罚机械臂回合终止
+            tracking_ee_sphere = 0. # 奖励末端球坐标跟踪
+            tracking_ee_world = 0.8 # 奖励末端世界坐标跟踪
+            tracking_ee_sphere_walking = 0.0 # 奖励行走时末端球坐标跟踪
+            tracking_ee_sphere_standing = 0.0 # 奖励站立时末端球坐标跟踪
+            tracking_ee_cart = None # 奖励末端笛卡尔跟踪
+            arm_energy_abs_sum = None # 惩罚机械臂能耗过大
+            tracking_ee_orn = 0. # 奖励末端姿态跟踪
+            tracking_ee_orn_ry = None # 奖励末端滚偏姿态跟踪
         
     class viewer:
         pos = [-20, 0, 20]  # [m]

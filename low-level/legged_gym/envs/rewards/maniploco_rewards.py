@@ -314,14 +314,16 @@ class ManipLoco_rewards:
             return 0,0
         foot_forces = torch.norm(self.env.contact_forces[:, self.env.feet_indices, :], dim=-1)
         desired_contact = self.env.desired_contact_states
+        transition_lower = getattr(self.env.cfg.rewards, "gait_transition_lower", 0.2)
+        stable_swing = desired_contact < transition_lower
 
         reward = 0
         for i in range(4):
-            reward += (1 - desired_contact[:, i]) * (
+            reward += stable_swing[:, i].float() * (
                         1 - torch.exp(-1 * foot_forces[:, i] ** 2 / self.env.cfg.rewards.gait_force_sigma))
         
-        # cmd_stop_flag = ~self.env._get_walking_cmd_mask()
-        # reward[cmd_stop_flag] = 0
+        cmd_stop_flag = ~self.env._get_walking_cmd_mask()
+        reward[cmd_stop_flag] = 0
         return reward / 4, reward / 4
 
     def _reward_tracking_contacts_shaped_vel(self):
@@ -329,13 +331,15 @@ class ManipLoco_rewards:
             return 0,0
         foot_velocities = torch.norm(self.env.foot_velocities, dim=2).view(self.env.num_envs, -1)
         desired_contact = self.env.desired_contact_states
+        transition_upper = getattr(self.env.cfg.rewards, "gait_transition_upper", 0.8)
+        stable_stance = desired_contact > transition_upper
         reward = 0
         for i in range(4):
-            reward += desired_contact[:, i] * (
+            reward += stable_stance[:, i].float() * (
                         1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.cfg.rewards.gait_vel_sigma))
-        # cmd_stop_flag = ~self.env._get_walking_cmd_mask()
-        # reward[cmd_stop_flag] = 0
         
+        cmd_stop_flag = ~self.env._get_walking_cmd_mask()
+        reward[cmd_stop_flag] = 0
         return reward / 4, reward / 4
     
     def _reward_feet_height(self):

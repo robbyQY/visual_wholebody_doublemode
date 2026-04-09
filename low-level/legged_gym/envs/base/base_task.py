@@ -167,6 +167,15 @@ class BaseTask():
         cam_pos = look_at_pos + self.lookat_vec
         self.set_camera(cam_pos, look_at_pos)
 
+    def _get_viewer_camera_position(self):
+        cam_transform = self.gym.get_viewer_camera_transform(self.viewer, None).p
+        return torch.tensor(
+            [cam_transform.x, cam_transform.y, cam_transform.z],
+            requires_grad=False,
+            device=self.device,
+            dtype=torch.float,
+        )
+
     def _orbit_camera(self, delta_yaw=0.0, delta_pitch=0.0, delta_radius=0.0):
         radius = torch.norm(self.lookat_vec).item()
         if radius < 1e-6:
@@ -224,8 +233,12 @@ class BaseTask():
                     
         if evt.action == "free_cam" and evt.value > 0:
             self.free_cam = not self.free_cam
-            if self.free_cam:
-                self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
+            if not self.free_cam:
+                # Re-enter follow mode from the current free-camera position so the
+                # transition stays continuous instead of snapping to a preset view.
+                cam_trans = self._get_viewer_camera_position()
+                look_at_pos = self.root_states[self.lookat_id, :3].clone()
+                self.lookat_vec = cam_trans - look_at_pos
         
         if evt.action == "pause" and evt.value > 0:
             self.pause = True
@@ -263,7 +276,6 @@ class BaseTask():
                 self.gym.poll_viewer_events(self.viewer)
 
             if not self.free_cam:
-                p = self.gym.get_viewer_camera_transform(self.viewer, None).p
-                cam_trans = torch.tensor([p.x, p.y, p.z], requires_grad=False, device=self.device)
+                cam_trans = self._get_viewer_camera_position()
                 look_at_pos = self.root_states[self.lookat_id, :3].clone()
                 self.lookat_vec = cam_trans - look_at_pos
