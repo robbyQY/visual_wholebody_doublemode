@@ -34,7 +34,7 @@ import os
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_float
+from legged_gym.utils.math import quat_apply_yaw, torch_rand_sqrt_float
 
 import torch
 import torch.distributed as dist
@@ -1339,7 +1339,7 @@ class ManipLoco(LeggedRobot):
             (len(env_ids), 1),
             device=self.device
         ).squeeze(1)
-        return wrap_to_pi(reference_yaw + yaw_delta)
+        return torch.clamp(reference_yaw + yaw_delta, min=-np.pi, max=np.pi)
     
     def _resample_ee_goal_orn_once(self, env_ids):
         ee_goal_delta_orn_r = torch_rand_float(self.goal_ee_ranges["delta_orn_r"][0], self.goal_ee_ranges["delta_orn_r"][1], (len(env_ids), 1), device=self.device)

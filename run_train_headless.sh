@@ -9,7 +9,7 @@ LOG_ROOT="/data/logs"
 PROJ_NAME="b1z1-low"
 EXPTID="train_default"
 TASK="b1z1"
-MAX_ITERATIONS="10"
+MAX_ITERATIONS=""
 NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
@@ -26,7 +26,8 @@ TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
 LOAD_EXPTID=""          # only used when TRAIN_MODE=load
 LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
 TRAIN_LOG_EVERY="100"
-NOHUP_BACKGROUND=false
+NOHUP_BACKGROUND=true
+RDZV_PORT="${RDZV_PORT:-}"
 
 DISABLE_WANDB=false
 OBSERVE_GAIT_COMMANDS=true
@@ -64,6 +65,8 @@ fi
 
 cd "${SCRIPT_DIR}"
 
+RUN_INSTANCE_ID="$(date +%Y%m%d_%H%M%S)_$$"
+
 timestamp_stderr_to_file() {
   local target_file="$1"
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -71,12 +74,44 @@ timestamp_stderr_to_file() {
   done >> "${target_file}"
 }
 
+pick_free_port() {
+  python - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+pick_torchrun_flag() {
+  local torchrun_help="$1"
+  local dashed_flag="$2"
+  local underscored_flag="$3"
+
+  if [[ "${torchrun_help}" == *"${dashed_flag}"* ]]; then
+    printf '%s' "${dashed_flag}"
+  else
+    printf '%s' "${underscored_flag}"
+  fi
+}
+
 if [[ "${NUM_GPUS}" -gt 1 ]]; then
+  if [[ -z "${RDZV_PORT}" ]]; then
+    RDZV_PORT="$(pick_free_port)"
+  fi
+  RDZV_ENDPOINT="127.0.0.1:${RDZV_PORT}"
+  TORCHRUN_HELP="$(torchrun --help 2>&1 || true)"
+  RDZV_BACKEND_FLAG="$(pick_torchrun_flag "${TORCHRUN_HELP}" "--rdzv-backend" "--rdzv_backend")"
+  RDZV_ENDPOINT_FLAG="$(pick_torchrun_flag "${TORCHRUN_HELP}" "--rdzv-endpoint" "--rdzv_endpoint")"
+  RDZV_ID_FLAG="$(pick_torchrun_flag "${TORCHRUN_HELP}" "--rdzv-id" "--rdzv_id")"
   LAUNCH_CMD=(
     torchrun
-    --standalone
     --nnodes=1
     --nproc_per_node "${NUM_GPUS}"
+    "${RDZV_BACKEND_FLAG}=c10d"
+    "${RDZV_ENDPOINT_FLAG}" "${RDZV_ENDPOINT}"
+    "${RDZV_ID_FLAG}" "${PROJ_NAME}-${EXPTID}-${RUN_INSTANCE_ID}"
     train.py
   )
 else
@@ -129,7 +164,7 @@ if (( ${#PRIV_REG_COEF_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--priv_reg_coef_schedule "$(IFS=,; echo "${PRIV_REG_COEF_SCHEDULE[*]}")")
 fi
 
-ERROR_LOG="${SH_DIR}/error.log"
+ERROR_LOG="${SH_DIR}/error_${RUN_INSTANCE_ID}.log"
 
 TRAIN_CMD=(
   "${LAUNCH_CMD[@]}"
@@ -162,9 +197,15 @@ if [[ -n "${MAX_ITERATIONS}" ]]; then
 fi
 
 if [[ "${NOHUP_BACKGROUND}" == true ]]; then
+  if [[ "${NUM_GPUS}" -gt 1 ]]; then
+    echo "Using rendezvous endpoint ${RDZV_ENDPOINT}"
+  fi
   nohup "${TRAIN_CMD[@]}" > /dev/null 2> >(timestamp_stderr_to_file "${ERROR_LOG}") &
   echo "Started background training (PID=$!)."
   echo "stderr -> ${ERROR_LOG}"
 else
+  if [[ "${NUM_GPUS}" -gt 1 ]]; then
+    echo "Using rendezvous endpoint ${RDZV_ENDPOINT}"
+  fi
   "${TRAIN_CMD[@]}" 2> >(timestamp_stderr_to_file "${ERROR_LOG}")
 fi
