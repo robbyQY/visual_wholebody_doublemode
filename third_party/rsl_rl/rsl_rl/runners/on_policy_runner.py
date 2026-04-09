@@ -40,6 +40,7 @@ import torch.distributed as dist
 from rsl_rl.algorithms import PPO
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
 from rsl_rl.env import VecEnv
+from rsl_rl.utils import resolve_schedule_value
 
 import wandb
 from torchinfo import summary
@@ -98,41 +99,30 @@ class OnPolicyRunner:
 
         self.alg.set_arm_default_coeffs(self.env.p_gains[12:], self.env.d_gains[12:], self.env.default_dof_pos[-7:-2])
 
-    def _resolve_env_schedule(self, schedule, iteration, total_iterations):
-        return self.alg.resolve_schedule_value(schedule, iteration, default_duration=total_iterations)
-
     def _apply_env_curricula(self, iteration, total_iterations):
         self.curriculum_state = {}
 
-        lin_vel_x_schedule = getattr(self.env.cfg.commands, "lin_vel_x_schedule", None)
-        if lin_vel_x_schedule is not None:
-            lin_vel_x_limit = self._resolve_env_schedule(lin_vel_x_schedule, iteration, total_iterations)
-            self.env.command_ranges["lin_vel_x"] = [-lin_vel_x_limit, lin_vel_x_limit]
-            self.curriculum_state["Loss/lin_vel_x_command_min"] = -lin_vel_x_limit
-            self.curriculum_state["Loss/lin_vel_x_command_max"] = lin_vel_x_limit
-        else:
-            self.curriculum_state["Loss/lin_vel_x_command_min"] = float(self.env.command_ranges["lin_vel_x"][0])
-            self.curriculum_state["Loss/lin_vel_x_command_max"] = float(self.env.command_ranges["lin_vel_x"][1])
+        lin_vel_x_min = resolve_schedule_value(self.env.cfg.commands.lin_vel_x_min_schedule, iteration, default_end_iter=total_iterations)
+        lin_vel_x_max = resolve_schedule_value(self.env.cfg.commands.lin_vel_x_max_schedule, iteration, default_end_iter=total_iterations)
+        self.env.command_ranges["lin_vel_x"] = [lin_vel_x_min, lin_vel_x_max]
+        self.curriculum_state["Loss/lin_vel_x_command_min"] = lin_vel_x_min
+        self.curriculum_state["Loss/lin_vel_x_command_max"] = lin_vel_x_max
 
-        ang_vel_yaw_schedule = getattr(self.env.cfg.commands, "ang_vel_yaw_schedule", None)
-        if ang_vel_yaw_schedule is not None:
-            ang_vel_yaw_limit = self._resolve_env_schedule(ang_vel_yaw_schedule, iteration, total_iterations)
-            self.env.command_ranges["ang_vel_yaw"] = [-ang_vel_yaw_limit, ang_vel_yaw_limit]
-            self.curriculum_state["Loss/ang_vel_yaw_command_min"] = -ang_vel_yaw_limit
-            self.curriculum_state["Loss/ang_vel_yaw_command_max"] = ang_vel_yaw_limit
-        else:
-            self.curriculum_state["Loss/ang_vel_yaw_command_min"] = float(self.env.command_ranges["ang_vel_yaw"][0])
-            self.curriculum_state["Loss/ang_vel_yaw_command_max"] = float(self.env.command_ranges["ang_vel_yaw"][1])
+        ang_vel_yaw_max = resolve_schedule_value(self.env.cfg.commands.ang_vel_yaw_schedule, iteration, default_end_iter=total_iterations)
+        ang_vel_yaw_min = -ang_vel_yaw_max
+        self.env.command_ranges["ang_vel_yaw"] = [ang_vel_yaw_min, ang_vel_yaw_max]
+        self.curriculum_state["Loss/ang_vel_yaw_command_min"] = ang_vel_yaw_min
+        self.curriculum_state["Loss/ang_vel_yaw_command_max"] = ang_vel_yaw_max
 
         tracking_lin_vel_max_schedule = getattr(self.env.cfg.rewards, "tracking_lin_vel_max_schedule", None)
         if tracking_lin_vel_max_schedule is not None:
-            tracking_lin_vel_max_scale = self._resolve_env_schedule(tracking_lin_vel_max_schedule, iteration, total_iterations)
+            tracking_lin_vel_max_scale = resolve_schedule_value(tracking_lin_vel_max_schedule, iteration, default_end_iter=total_iterations)
             self.env.reward_scales["tracking_lin_vel_max"] = tracking_lin_vel_max_scale
         self.curriculum_state["Loss/tracking_lin_vel_max_scale"] = float(self.env.reward_scales["tracking_lin_vel_max"])
 
         tracking_ang_vel_schedule = getattr(self.env.cfg.rewards, "tracking_ang_vel_schedule", None)
         if tracking_ang_vel_schedule is not None:
-            tracking_ang_vel_scale = self._resolve_env_schedule(tracking_ang_vel_schedule, iteration, total_iterations)
+            tracking_ang_vel_scale = resolve_schedule_value(tracking_ang_vel_schedule, iteration, default_end_iter=total_iterations)
             self.env.reward_scales["tracking_ang_vel"] = tracking_ang_vel_scale
         self.curriculum_state["Loss/tracking_ang_vel_scale"] = float(self.env.reward_scales["tracking_ang_vel"])
     

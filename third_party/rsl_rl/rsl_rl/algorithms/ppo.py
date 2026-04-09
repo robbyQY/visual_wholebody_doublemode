@@ -36,6 +36,7 @@ import torch.distributed as dist
 
 from rsl_rl.modules import ActorCritic
 from rsl_rl.storage import RolloutStorage
+from rsl_rl.utils import resolve_schedule_value
 
 class PPO:
     actor_critic: ActorCritic
@@ -106,31 +107,6 @@ class PPO:
         self.distributed = False
         self.rank = 0
         self.world_size = 1
-
-    @staticmethod
-    def resolve_schedule_value(schedule, counter, default_duration=None):
-        if schedule is None:
-            return None
-        if isinstance(schedule, torch.Tensor):
-            schedule = schedule.detach().cpu().tolist()
-        schedule = list(schedule)
-        if len(schedule) == 0:
-            return None
-        if len(schedule) == 2:
-            start_value, end_value = schedule
-            start_iter = 0.0
-            duration = float(default_duration if default_duration is not None else 1.0)
-        elif len(schedule) == 3:
-            start_value = 0.0
-            end_value, start_iter, duration = schedule
-        elif len(schedule) == 4:
-            start_value, end_value, start_iter, duration = schedule
-        else:
-            raise ValueError(f"Unsupported schedule format: {schedule}")
-
-        duration = max(float(duration), 1.0)
-        progress = min(max((float(counter) - float(start_iter)) / duration, 0.0), 1.0)
-        return float(start_value) + (float(end_value) - float(start_value)) * progress
 
     def setup_distributed(self):
         self.distributed = dist.is_available() and dist.is_initialized()
@@ -375,10 +351,10 @@ class PPO:
         self.counter += 1
     
     def get_value_mixing_ratio(self):
-        return self.resolve_schedule_value(self.mixing_schedule, self.counter, default_duration=1.0) or 0.0
+        return resolve_schedule_value(self.mixing_schedule, self.counter, default_end_iter=1.0) or 0.0
 
     def get_priv_reg_coef(self):
-        return self.resolve_schedule_value(self.priv_reg_coef_schedule, self.counter, default_duration=1.0) or 0.0
+        return resolve_schedule_value(self.priv_reg_coef_schedule, self.counter, default_end_iter=1.0) or 0.0
     
     def get_torque_supervision_weight(self):
         return (1 - min(max((self.counter - self.torque_supervision_schedule[1]) / self.torque_supervision_schedule[2], 0), 1)) * self.torque_supervision_schedule[0]

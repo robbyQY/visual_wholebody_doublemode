@@ -13,7 +13,8 @@ NUM_ENVS=""
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO=""
 OMNIDIRECTIONAL_POS_Y=false
-LIN_VEL_X_SCHEDULE=()
+LIN_VEL_X_MIN_SCHEDULE=()
+LIN_VEL_X_MAX_SCHEDULE=()
 ANG_VEL_YAW_SCHEDULE=()
 TRACKING_LIN_VEL_MAX_SCHEDULE=()
 TRACKING_ANG_VEL_SCHEDULE=()
@@ -95,8 +96,11 @@ case "${TRAIN_MODE}" in
 esac
 
 CURRICULUM_ARGS=()
-if (( ${#LIN_VEL_X_SCHEDULE[@]} > 0 )); then
-  CURRICULUM_ARGS+=(--lin_vel_x_schedule "$(IFS=,; echo "${LIN_VEL_X_SCHEDULE[*]}")")
+if (( ${#LIN_VEL_X_MIN_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--lin_vel_x_min_schedule "$(IFS=,; echo "${LIN_VEL_X_MIN_SCHEDULE[*]}")")
+fi
+if (( ${#LIN_VEL_X_MAX_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--lin_vel_x_max_schedule "$(IFS=,; echo "${LIN_VEL_X_MAX_SCHEDULE[*]}")")
 fi
 if (( ${#ANG_VEL_YAW_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--ang_vel_yaw_schedule "$(IFS=,; echo "${ANG_VEL_YAW_SCHEDULE[*]}")")

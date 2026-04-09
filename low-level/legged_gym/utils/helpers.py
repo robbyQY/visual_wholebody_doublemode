@@ -387,9 +387,12 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.goal_ee.sphere_center.trunk_follow_ratio = args.trunk_follow_ratio
         if args.omnidirectional_pos_y:
             env_cfg.goal_ee.ranges.omnidirectional_pos_y = True
-        lin_vel_x_schedule = _parse_schedule_arg(args.lin_vel_x_schedule)
-        if lin_vel_x_schedule is not None:
-            env_cfg.commands.lin_vel_x_schedule = lin_vel_x_schedule
+        lin_vel_x_min_schedule = _parse_schedule_arg(args.lin_vel_x_min_schedule)
+        if lin_vel_x_min_schedule is not None:
+            env_cfg.commands.lin_vel_x_min_schedule = lin_vel_x_min_schedule
+        lin_vel_x_max_schedule = _parse_schedule_arg(args.lin_vel_x_max_schedule)
+        if lin_vel_x_max_schedule is not None:
+            env_cfg.commands.lin_vel_x_max_schedule = lin_vel_x_max_schedule
         ang_vel_yaw_schedule = _parse_schedule_arg(args.ang_vel_yaw_schedule)
         if ang_vel_yaw_schedule is not None:
             env_cfg.commands.ang_vel_yaw_schedule = ang_vel_yaw_schedule
@@ -479,12 +482,13 @@ def get_args(test=False):
         {"name": "--mixed_height_reference", "action": "store_true", "default": False, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
         {"name": "--omnidirectional_pos_y", "action": "store_true", "default": False, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
-        {"name": "--lin_vel_x_schedule", "type": str, "help": "Curriculum for |lin_vel_x| command range as comma-separated values: start,end or start,end,start_iter,duration."},
-        {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,duration."},
-        {"name": "--tracking_lin_vel_max_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_lin_vel_max as comma-separated values: start,end or start,end,start_iter,duration."},
-        {"name": "--tracking_ang_vel_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_ang_vel as comma-separated values: start,end or start,end,start_iter,duration."},
-        {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,duration or start,end,start_iter,duration."},
-        {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,duration."},
+        {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
+        {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
+        {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},
+        {"name": "--tracking_lin_vel_max_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_lin_vel_max as comma-separated values: start,end or start,end,start_iter,end_iter."},
+        {"name": "--tracking_ang_vel_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_ang_vel as comma-separated values: start,end or start,end,start_iter,end_iter."},
+        {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,end_iter or start,end,start_iter,end_iter."},
+        {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedual", "type": str, "help": "Deprecated alias for --priv_reg_coef_schedule."},
         
         {"name": "--rows", "type": int, "help": "num_rows."},

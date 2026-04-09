@@ -44,6 +44,7 @@ from legged_gym.envs.base.legged_robot import LeggedRobot
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.terrain import Terrain, Terrain_Perlin
+from rsl_rl.utils import resolve_schedule_value
 from .b1z1_config import B1Z1RoughCfg
 
 import sys
@@ -367,7 +368,13 @@ class ManipLoco(LeggedRobot):
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.arm_reward_scales = class_to_dict(self.cfg.rewards.arm_scales)
-        self.command_ranges = class_to_dict(self.cfg.commands.ranges)
+        lin_vel_x_min = resolve_schedule_value(self.cfg.commands.lin_vel_x_min_schedule, counter=0.0)
+        lin_vel_x_max = resolve_schedule_value(self.cfg.commands.lin_vel_x_max_schedule, counter=0.0)
+        ang_vel_yaw_max = resolve_schedule_value(self.cfg.commands.ang_vel_yaw_schedule, counter=0.0)
+        self.command_ranges = {
+            "lin_vel_x": [lin_vel_x_min, lin_vel_x_max],
+            "ang_vel_yaw": [-ang_vel_yaw_max, ang_vel_yaw_max],
+        }
         self.goal_ee_ranges = class_to_dict(self.cfg.goal_ee.ranges)
 
         if self.cfg.terrain.mesh_type not in ['heightfield', 'trimesh']:
@@ -975,13 +982,19 @@ class ManipLoco(LeggedRobot):
         if self.cfg.env.teleop_mode:
             return
 
-        if self.global_steps < 5000 * 24: # 5000 can learn forward
-            self.commands[env_ids, 0] = torch_rand_float(0, self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-        else:
-            self.commands[env_ids, 0] = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-
+        self.commands[env_ids, 0] = torch_rand_float(
+            self.command_ranges["lin_vel_x"][0],
+            self.command_ranges["lin_vel_x"][1],
+            (len(env_ids), 1),
+            device=self.device,
+        ).squeeze(1)
         self.commands[env_ids, 1] = 0
-        self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        self.commands[env_ids, 2] = torch_rand_float(
+            self.command_ranges["ang_vel_yaw"][0],
+            self.command_ranges["ang_vel_yaw"][1],
+            (len(env_ids), 1),
+            device=self.device,
+        ).squeeze(1)
         # set small commands to zero
         self.commands[env_ids, :] *= (torch.logical_or(torch.abs(self.commands[env_ids, 0]) > self.cfg.commands.lin_vel_x_clip, torch.abs(self.commands[env_ids, 2]) > self.cfg.commands.ang_vel_yaw_clip)).unsqueeze(1)
 

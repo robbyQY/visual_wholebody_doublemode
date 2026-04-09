@@ -30,6 +30,35 @@
 
 import torch
 
+
+def resolve_schedule_value(schedule, counter, default_end_iter=None):
+    if schedule is None:
+        return None
+    if isinstance(schedule, torch.Tensor):
+        schedule = schedule.detach().cpu().tolist()
+    schedule = list(schedule)
+    if len(schedule) == 0:
+        return None
+    if len(schedule) == 2:
+        start_value, end_value = schedule
+        start_iter = 0.0
+        end_iter = float(default_end_iter if default_end_iter is not None else 1.0)
+    elif len(schedule) == 3:
+        start_value = 0.0
+        end_value, start_iter, end_iter = schedule
+    elif len(schedule) == 4:
+        start_value, end_value, start_iter, end_iter = schedule
+    else:
+        raise ValueError(f"Unsupported schedule format: {schedule}")
+
+    start_iter = float(start_iter)
+    end_iter = float(end_iter)
+    if end_iter <= start_iter:
+        progress = 1.0 if float(counter) >= start_iter else 0.0
+    else:
+        progress = min(max((float(counter) - start_iter) / (end_iter - start_iter), 0.0), 1.0)
+    return float(start_value) + (float(end_value) - float(start_value)) * progress
+
 def split_and_pad_trajectories(tensor, dones):
     """ Splits trajectories at done indices. Then concatenates them and padds with zeros up to the length og the longest trajectory.
     Returns masks corresponding to valid parts of the trajectories

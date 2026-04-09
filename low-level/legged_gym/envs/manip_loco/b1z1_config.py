@@ -83,15 +83,12 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         resampling_time = 3. # time before command are changed[s]
 
         # Command-range curricula
-        lin_vel_x_schedule = None
-        ang_vel_yaw_schedule = None
+        lin_vel_x_min_schedule = [0.0, -0.8, 5000, 5000]
+        lin_vel_x_max_schedule = [0.8, 0.8, 0, 0]
+        ang_vel_yaw_schedule = [1.0, 1.0, 0, 0]
 
         ang_vel_yaw_clip = 0.5
         lin_vel_x_clip = 0.2
-
-        class ranges:
-            lin_vel_x = [-0.8, 0.8] # min max [m/s]
-            ang_vel_yaw = [-1.0, 1.0]    # min max [rad/s]
 
     class normalization:
         class obs_scales:
@@ -408,7 +405,7 @@ class B1Z1RoughCfgPPO(LeggedRobotCfgPPO):
         adaptive_arm_gains = B1Z1RoughCfg.control.adaptive_arm_gains
         # dagger params
         dagger_update_freq = 20
-        priv_reg_coef_schedule = [0, 0.1, 3000, 7000] #if not RESUME else [0, 1, 1000, 1000]
+        priv_reg_coef_schedule = [0, 0.1, 3000, 10000] #if not RESUME else [0, 1, 1000, 2000]
 
     class runner:
         policy_class_name = 'ActorCritic'
