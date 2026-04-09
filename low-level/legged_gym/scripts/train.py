@@ -227,6 +227,7 @@ def log_training_header(args, log_pth, num_gpus):
     print(f"EFFECTIVE_TRAIN_MODE={getattr(args, 'effective_train_mode', getattr(args, 'train_mode', 'fresh'))}")
     print(f"LOAD_EXPTID={getattr(args, 'load_exptid', None) or '<none>'}")
     print(f"LOAD_CKPT={getattr(args, 'checkpoint', '<default>')}")
+    print(f"TRAIN_LOG_EVERY={getattr(args, 'train_log_every', 1)}")
     print(f"NUM_ENVS={total_num_envs}")
     print(f"NUM_GPUS={num_gpus}")
     print(f"DISTRIBUTED={distributed}")

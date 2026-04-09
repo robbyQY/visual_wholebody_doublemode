@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="/workspace/visual_wholebody"
 SCRIPT_DIR="${ROOT_DIR}/low-level/legged_gym/scripts"
+SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_ROOT="/data/logs"
 
 PROJ_NAME="b1z1-low"
@@ -24,6 +25,8 @@ PRIV_REG_COEF_SCHEDULE=()
 TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
 LOAD_EXPTID=""          # only used when TRAIN_MODE=load
 LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
+TRAIN_LOG_EVERY="100"
+NOHUP_BACKGROUND=false
 
 DISABLE_WANDB=false
 OBSERVE_GAIT_COMMANDS=true
@@ -60,6 +63,13 @@ else
 fi
 
 cd "${SCRIPT_DIR}"
+
+timestamp_stderr_to_file() {
+  local target_file="$1"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    printf '[%(%Y-%m-%d %H:%M:%S)T] %s\n' -1 "${line}"
+  done >> "${target_file}"
+}
 
 if [[ "${NUM_GPUS}" -gt 1 ]]; then
   LAUNCH_CMD=(
@@ -119,16 +129,42 @@ if (( ${#PRIV_REG_COEF_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--priv_reg_coef_schedule "$(IFS=,; echo "${PRIV_REG_COEF_SCHEDULE[*]}")")
 fi
 
-"${LAUNCH_CMD[@]}" \
-  --proj_name "${PROJ_NAME}" \
-  --exptid "${EXPTID}" \
-  --task "${TASK}" \
-  "${TRAIN_MODE_ARGS[@]}" \
-  "${CURRICULUM_ARGS[@]}" \
-  $([[ "${OBSERVE_GAIT_COMMANDS}" == true ]] && echo --observe_gait_commands) \
-  $([[ "${MIXED_HEIGHT_REFERENCE}" == true ]] && echo --mixed_height_reference) \
-  $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
-  $([[ "${OMNIDIRECTIONAL_POS_Y}" == true ]] && echo --omnidirectional_pos_y) \
-  --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}" \
-  $([[ -n "${NUM_ENVS}" ]] && echo --num_envs "${NUM_ENVS}") \
-  $([[ -n "${MAX_ITERATIONS}" ]] && echo --max_iterations "${MAX_ITERATIONS}")
+ERROR_LOG="${SH_DIR}/error.log"
+
+TRAIN_CMD=(
+  "${LAUNCH_CMD[@]}"
+  --proj_name "${PROJ_NAME}"
+  --exptid "${EXPTID}"
+  --task "${TASK}"
+  "${TRAIN_MODE_ARGS[@]}"
+  "${CURRICULUM_ARGS[@]}"
+  --train_log_every "${TRAIN_LOG_EVERY}"
+  --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}"
+)
+
+if [[ "${OBSERVE_GAIT_COMMANDS}" == true ]]; then
+  TRAIN_CMD+=(--observe_gait_commands)
+fi
+if [[ "${MIXED_HEIGHT_REFERENCE}" == true ]]; then
+  TRAIN_CMD+=(--mixed_height_reference)
+fi
+if [[ -n "${TRUNK_FOLLOW_RATIO}" ]]; then
+  TRAIN_CMD+=(--trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}")
+fi
+if [[ "${OMNIDIRECTIONAL_POS_Y}" == true ]]; then
+  TRAIN_CMD+=(--omnidirectional_pos_y)
+fi
+if [[ -n "${NUM_ENVS}" ]]; then
+  TRAIN_CMD+=(--num_envs "${NUM_ENVS}")
+fi
+if [[ -n "${MAX_ITERATIONS}" ]]; then
+  TRAIN_CMD+=(--max_iterations "${MAX_ITERATIONS}")
+fi
+
+if [[ "${NOHUP_BACKGROUND}" == true ]]; then
+  nohup "${TRAIN_CMD[@]}" > /dev/null 2> >(timestamp_stderr_to_file "${ERROR_LOG}") &
+  echo "Started background training (PID=$!)."
+  echo "stderr -> ${ERROR_LOG}"
+else
+  "${TRAIN_CMD[@]}" 2> >(timestamp_stderr_to_file "${ERROR_LOG}")
+fi

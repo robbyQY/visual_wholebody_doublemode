@@ -427,6 +427,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         # alg runner parameters
         if args.max_iterations is not None:
             cfg_train.runner.max_iterations = args.max_iterations
+        if args.train_log_every is not None:
+            cfg_train.runner.train_log_every = args.train_log_every
         if args.resume:
             cfg_train.runner.resume = args.resume
         if args.experiment_name is not None:
@@ -481,6 +483,7 @@ def get_args(test=False):
         {"name": "--resumeid", "type": str, "help": "exptid"},
         {"name": "--load_exptid", "type": str, "help": "Checkpoint source exptid for load mode. Loads weights only and starts training from iteration 0."},
         {"name": "--train_mode", "type": str, "default": "fresh", "help": "Training mode: fresh, resume, or load."},
+        {"name": "--train_log_every", "type": int, "default": 1, "help": "Print training progress every N iterations while keeping wandb logging every iteration."},
 
         {"name": "--no-headless", "action": "store_true", "help": "Enable viewer rendering"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},

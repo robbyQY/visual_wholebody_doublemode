@@ -79,6 +79,7 @@ class OnPolicyRunner:
         self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
+        self.train_log_every = max(1, int(self.cfg.get("train_log_every", 1)))
         if self.is_main_process:
             summary(self.alg.actor_critic)
 
@@ -213,7 +214,8 @@ class OnPolicyRunner:
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None and self.is_main_process:
-                self.log(locals())
+                should_print = ((it - self.current_learning_iteration) % self.train_log_every == 0) or (it == tot_iter - 1)
+                self.log(locals(), print_to_stdout=should_print)
             if self.is_main_process and it % self.save_interval == 0:
                 self.save(
                     os.path.join(self.log_dir, 'model_{}.pt'.format(it)),
@@ -230,7 +232,7 @@ class OnPolicyRunner:
                 next_learning_iteration=self.current_learning_iteration,
             )
 
-    def log(self, locs, width=80, pad=35):
+    def log(self, locs, width=80, pad=35, print_to_stdout=True):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
         self.tot_time += locs['collection_time'] + locs['learn_time']
         iteration_time = locs['collection_time'] + locs['learn_time']
@@ -326,7 +328,8 @@ class OnPolicyRunner:
                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
-        print(log_string)
+        if print_to_stdout:
+            print(log_string)
 
     def save(self, path, it, infos=None, next_learning_iteration=None):
         if next_learning_iteration is None:
