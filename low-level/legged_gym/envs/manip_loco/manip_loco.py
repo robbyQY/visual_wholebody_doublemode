@@ -1387,10 +1387,7 @@ class ManipLoco(LeggedRobot):
 
     def _resample_ee_goal(self, env_ids, is_init=False):
         if self.cfg.env.teleop_mode and is_init:
-            self.curr_ee_goal_sphere[:] = self.init_start_ee_sphere[:]
-            self.teleop_raw_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
-            self.teleop_raw_ee_goal_orn_delta_rpy[:] = 0
-            self._update_effective_teleop_inputs()
+            self._reset_teleop_ee_goal_to_default()
             return
         elif self.cfg.env.teleop_mode:
             return
@@ -1426,6 +1423,12 @@ class ManipLoco(LeggedRobot):
         collision_mask = torch.any(torch.logical_and(torch.all(ee_target_cart < self.collision_upper_limits, dim=-1), torch.all(ee_target_cart > self.collision_lower_limits, dim=-1)), dim=0)
         underground_mask = torch.any(ee_target_cart[..., 2] < self.underground_limit, dim=0)
         return collision_mask | underground_mask
+
+    def _reset_teleop_ee_goal_to_default(self):
+        self.curr_ee_goal_sphere[:] = self.init_start_ee_sphere[:]
+        self.teleop_raw_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
+        self.teleop_raw_ee_goal_orn_delta_rpy[:] = 0
+        self._update_effective_teleop_inputs()
 
     def _update_curr_ee_goal(self):
         if not self.cfg.env.teleop_mode:
@@ -1525,6 +1528,7 @@ class ManipLoco(LeggedRobot):
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_N, "decrease_eef_goal_dy")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "open_gripper")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "close_gripper")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_L, "reset_eef_goal_pose")
             if self.cfg.goal_ee.sphere_center.mixed_height_reference:
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "set_height_reference_invariant")
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_T, "set_height_reference_follow")
@@ -1597,6 +1601,10 @@ class ManipLoco(LeggedRobot):
             self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] += 0.05
         elif evt.action == "decrease_eef_goal_dy":
             self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] -= 0.05
+
+        if evt.action == "reset_eef_goal_pose":
+            self._reset_teleop_ee_goal_to_default()
+            print("[teleop] reset end-effector goal pose to default")
 
         if evt.action == "open_gripper":
             self.gripper_pos_targets += 0.05
