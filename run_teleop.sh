@@ -51,28 +51,25 @@ GPU_ID="1"
 ROOT_DIR="/workspace/visual_wholebody/low-level"
 SCRIPT_DIR="${ROOT_DIR}/legged_gym/scripts"
 LOG_ROOT="/data/logs"
+
 PROJ_NAME="b1z1-low"
 EXPTID="train_default"
 CHECKPOINT="45000"
 CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
 SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 
-USE_INTERFACE=true
 HEADLESS=false
-TELEOP_MODE=true
 TELEOP_INPUT_REGULARIZATION=false
-ACTION_DELAY_MODE="auto"  # auto: keep training curriculum, undelayed: latest action, delayed: one-step delayed action
-EE_GOAL_OBS_MODE="command"  # command | arm_base_target
+ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
+EE_GOAL_OBS_MODE="command"  # command | arm_base_target (official ckpt)
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
 cd "${SCRIPT_DIR}"
-SCRIPT="play.py"
-[[ "${USE_INTERFACE}" == true ]] && SCRIPT="b1z1_interface.py"
 
-python "${SCRIPT}" \
+python "b1z1_interface.py" \
   --exptid "${EXPTID}" \
   --task b1z1 \
   --proj_name "${PROJ_NAME}" \
@@ -80,7 +77,7 @@ python "${SCRIPT}" \
   --sim_device "cuda:${GPU_ID}" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
-  $([[ "${TELEOP_MODE}" == true ]] && echo --teleop_mode) \
+  --teleop_mode \
   $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
   --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}" \
