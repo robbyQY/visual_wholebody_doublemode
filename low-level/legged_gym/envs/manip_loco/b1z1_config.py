@@ -58,6 +58,10 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             pos_y = [-1.2, 1.2]  # relative yaw offset from the episode start yaw when omnidirectional_pos_y is enabled
             omnidirectional_pos_y = False
             omnidirectional_init_pos_y = [-5 * np.pi / 6, 5 * np.pi / 6]  # reset-time absolute yaw range before intersecting with the Z1 waist joint limits
+            omnidirectional_rear_transition_pos_y_abs = 2 * np.pi / 3  # keep front/side ranges unchanged until |yaw| exceeds 120 deg
+            omnidirectional_pos_l = [0.2, 0.95]  # omni-only radial range before the rear-sector contraction kicks in
+            omnidirectional_rear_pos_l = [0.2, 0.5]  # omni-only radial range at directly behind the robot
+            omnidirectional_rear_pos_p = [-np.pi / 6, np.pi / 6]  # omni-only pitch range at directly behind the robot
             
             delta_orn_r = [-0.5, 0.5]
             delta_orn_p = [-0.5, 0.5]

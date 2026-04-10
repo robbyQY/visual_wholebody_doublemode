@@ -34,7 +34,7 @@ import os
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-from legged_gym.utils.math import quat_apply_yaw, torch_rand_sqrt_float
+from legged_gym.utils.math import quat_apply_yaw, torch_rand_sqrt_float, wrap_to_pi
 
 import torch
 import torch.distributed as dist
@@ -831,7 +831,13 @@ class ManipLoco(LeggedRobot):
         self.init_end_ee_sphere = torch.tensor(self.cfg.goal_ee.ranges.init_pos_end, device=self.device).unsqueeze(0)
         self.reset_init_ee_sphere = self.init_start_ee_sphere.repeat(self.num_envs, 1)
         self.omnidirectional_pos_y = bool(self.cfg.goal_ee.ranges.omnidirectional_pos_y)
-        
+        self.omnidirectional_rear_transition_pos_y_abs = float(self.cfg.goal_ee.ranges.omnidirectional_rear_transition_pos_y_abs)
+        if not (0.0 <= self.omnidirectional_rear_transition_pos_y_abs < np.pi):
+            raise ValueError("goal_ee.ranges.omnidirectional_rear_transition_pos_y_abs must be in [0, pi)")
+        self.omnidirectional_pos_l = torch.tensor(self.cfg.goal_ee.ranges.omnidirectional_pos_l, device=self.device, dtype=torch.float)
+        self.omnidirectional_rear_pos_l = torch.tensor(self.cfg.goal_ee.ranges.omnidirectional_rear_pos_l, device=self.device, dtype=torch.float)
+        self.omnidirectional_rear_pos_p = torch.tensor(self.cfg.goal_ee.ranges.omnidirectional_rear_pos_p, device=self.device, dtype=torch.float)
+
         #noise
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.add_noise = self.cfg.noise.add_noise
@@ -1378,9 +1384,43 @@ class ManipLoco(LeggedRobot):
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
     
     def _resample_ee_goal_sphere_once(self, env_ids):
+        goal_yaw = self._sample_ee_goal_yaw(env_ids, self.ee_start_sphere[env_ids, 2])
+        self.ee_goal_sphere[env_ids, 2] = goal_yaw
+
+        if self.omnidirectional_pos_y:
+            pos_l_min, pos_l_max, pos_p_min, pos_p_max = self._get_omnidirectional_goal_sampling_bounds(goal_yaw)
+            self.ee_goal_sphere[env_ids, 0] = pos_l_min + (pos_l_max - pos_l_min) * torch.rand(len(env_ids), device=self.device)
+            self.ee_goal_sphere[env_ids, 1] = pos_p_min + (pos_p_max - pos_p_min) * torch.rand(len(env_ids), device=self.device)
+            return
+
         self.ee_goal_sphere[env_ids, 0] = torch_rand_float(self.goal_ee_ranges["pos_l"][0], self.goal_ee_ranges["pos_l"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         self.ee_goal_sphere[env_ids, 1] = torch_rand_float(self.goal_ee_ranges["pos_p"][0], self.goal_ee_ranges["pos_p"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-        self.ee_goal_sphere[env_ids, 2] = self._sample_ee_goal_yaw(env_ids, self.ee_start_sphere[env_ids, 2])
+
+    def _get_omnidirectional_goal_sampling_bounds(self, goal_yaw):
+        rear_weight = self._get_omnidirectional_rear_weight(goal_yaw)
+
+        pos_l_min_front = torch.full_like(goal_yaw, self.omnidirectional_pos_l[0].item())
+        pos_l_min_back = torch.full_like(goal_yaw, self.omnidirectional_rear_pos_l[0].item())
+        pos_l_min = torch.lerp(pos_l_min_front, pos_l_min_back, rear_weight)
+        pos_l_max_front = torch.full_like(goal_yaw, self.omnidirectional_pos_l[1].item())
+        pos_l_max_back = torch.full_like(goal_yaw, self.omnidirectional_rear_pos_l[1].item())
+        pos_l_max = torch.lerp(pos_l_max_front, pos_l_max_back, rear_weight)
+
+        pos_p_min_front = torch.full_like(goal_yaw, float(self.goal_ee_ranges["pos_p"][0]))
+        pos_p_max_front = torch.full_like(goal_yaw, float(self.goal_ee_ranges["pos_p"][1]))
+        pos_p_min_back = torch.full_like(goal_yaw, self.omnidirectional_rear_pos_p[0].item())
+        pos_p_max_back = torch.full_like(goal_yaw, self.omnidirectional_rear_pos_p[1].item())
+        pos_p_min = torch.lerp(pos_p_min_front, pos_p_min_back, rear_weight)
+        pos_p_max = torch.lerp(pos_p_max_front, pos_p_max_back, rear_weight)
+
+        return pos_l_min, pos_l_max, pos_p_min, pos_p_max
+
+    def _get_omnidirectional_rear_weight(self, goal_yaw):
+        abs_yaw = torch.abs(wrap_to_pi(goal_yaw))
+        denom = np.pi - self.omnidirectional_rear_transition_pos_y_abs
+        transition = (abs_yaw - self.omnidirectional_rear_transition_pos_y_abs) / denom
+        transition = torch.clamp(transition, 0.0, 1.0)
+        return transition * transition * (3.0 - 2.0 * transition)
 
     def _sample_ee_goal_yaw(self, env_ids, reference_yaw=None):
         if not self.omnidirectional_pos_y:
