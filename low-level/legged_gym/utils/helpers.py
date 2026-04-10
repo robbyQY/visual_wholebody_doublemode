@@ -460,12 +460,6 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         ang_vel_yaw_schedule = _parse_schedule_arg(args.ang_vel_yaw_schedule)
         if ang_vel_yaw_schedule is not None:
             env_cfg.commands.ang_vel_yaw_schedule = ang_vel_yaw_schedule
-        tracking_lin_vel_max_schedule = _parse_schedule_arg(args.tracking_lin_vel_max_schedule)
-        if tracking_lin_vel_max_schedule is not None:
-            env_cfg.rewards.tracking_lin_vel_max_schedule = tracking_lin_vel_max_schedule
-        tracking_ang_vel_schedule = _parse_schedule_arg(args.tracking_ang_vel_schedule)
-        if tracking_ang_vel_schedule is not None:
-            env_cfg.rewards.tracking_ang_vel_schedule = tracking_ang_vel_schedule
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -558,8 +552,6 @@ def get_args(test=False):
         {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},
-        {"name": "--tracking_lin_vel_max_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_lin_vel_max as comma-separated values: start,end or start,end,start_iter,end_iter."},
-        {"name": "--tracking_ang_vel_schedule", "type": str, "help": "Curriculum for rewards.scales.tracking_ang_vel as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,end_iter or start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedual", "type": str, "help": "Deprecated alias for --priv_reg_coef_schedule."},

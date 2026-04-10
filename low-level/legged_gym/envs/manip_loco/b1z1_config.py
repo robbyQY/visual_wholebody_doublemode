@@ -125,9 +125,9 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         teleop_input_regularization = False # If true, preprocess teleop inputs before feeding the policy/control stack
         teleop_zero_lin_vel_x_clip = 0.2
         teleop_zero_ang_vel_yaw_clip = 0.5
-        teleop_lin_vel_x_limit = 0.4
-        teleop_ang_vel_yaw_limit = 0.6
-        teleop_ee_goal_x_limit = [0.0, 0.7]
+        teleop_lin_vel_x_limit = 0.8
+        teleop_ang_vel_yaw_limit = 1.0
+        teleop_ee_goal_x_limit = [-0.5, 1.0]
         teleop_ee_goal_y_limit = [-0.7, 0.7]
         teleop_ee_goal_z_limit = [-0.6, 0.6]
         record_video = False
@@ -135,9 +135,9 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         observe_gait_commands = False
         gait_frequency_min = 2.0
         gait_frequency_max = 2.0
-        gait_frequency_lin_vel_ref = 0.8
-        gait_frequency_ang_vel_ref = 1.0
-        gait_frequency_ang_vel_weight = 0.35
+        gait_frequency_lin_vel_ref = 1.2
+        gait_frequency_ang_vel_ref = 2.0
+        gait_frequency_ang_vel_weight = 1.0
 
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.5] # x,y,z [m]
@@ -247,10 +247,6 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
 
         feet_aritime_allfeet = False
         feet_height_allfeet = False
-        # Reward-scale curricula
-        tracking_lin_vel_max_schedule = None
-        tracking_ang_vel_schedule = None
-
         # Scales set to 0 or None will both be skipped in the current reward setup
         # Disabled terms are neither computed nor logged as reward metrics
         class scales:

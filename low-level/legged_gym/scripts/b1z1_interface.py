@@ -107,10 +107,15 @@ class ManipLoco_Policy():
         self.obs, _, rews, arm_rews, dones, infos = self.env.step(actions.detach())
 
         if self.timestamp % 10 == 0:
+            sim_time = (self.timestamp + 1) * self.env.dt
             actual_ee_pos = self._format_vec3(self.env.ee_pos)
             target_ee_pos = self._format_vec3(self.env.curr_ee_goal_cart_world)
+            command = self.env.commands[0].detach().cpu().tolist()
             print(
-                f"[teleop][env0] ee_pos_world={actual_ee_pos}, "
+                f"[teleop] sim_time={sim_time:.2f}s, "
+                f"lin_vel_cmd={command[0]:.3f}, "
+                f"ang_vel_yaw_cmd={command[2]:.3f}, "
+                f"ee_pos_world={actual_ee_pos}, "
                 f"ee_goal_world={target_ee_pos}"
             )
         stop_time = time.time()

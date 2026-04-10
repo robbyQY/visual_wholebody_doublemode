@@ -18,8 +18,6 @@ EE_GOAL_OBS_MODE="command"  # command | arm_base_target
 LIN_VEL_X_MIN_SCHEDULE=()
 LIN_VEL_X_MAX_SCHEDULE=()
 ANG_VEL_YAW_SCHEDULE=()
-TRACKING_LIN_VEL_MAX_SCHEDULE=()
-TRACKING_ANG_VEL_SCHEDULE=()
 MIXING_SCHEDULE=()
 PRIV_REG_COEF_SCHEDULE=()
 TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
@@ -31,13 +29,8 @@ RDZV_PORT="${RDZV_PORT:-}"
 
 DISABLE_WANDB=false
 OBSERVE_GAIT_COMMANDS=true
-# Leave these empty to keep the config-default fixed gait frequency.
-# Set min/max to different values to enable command-dependent gait frequency.
-GAIT_FREQUENCY_MIN=""
-GAIT_FREQUENCY_MAX=""
-GAIT_FREQUENCY_LIN_VEL_REF=""
-GAIT_FREQUENCY_ANG_VEL_REF=""
-GAIT_FREQUENCY_ANG_VEL_WEIGHT=""
+# Set to true to enable command-dependent gait frequency with min/max = 1.2/2.8.
+ENABLE_DYNAMIC_GAIT_FREQUENCY=false
 
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
@@ -158,12 +151,6 @@ fi
 if (( ${#ANG_VEL_YAW_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--ang_vel_yaw_schedule "$(IFS=,; echo "${ANG_VEL_YAW_SCHEDULE[*]}")")
 fi
-if (( ${#TRACKING_LIN_VEL_MAX_SCHEDULE[@]} > 0 )); then
-  CURRICULUM_ARGS+=(--tracking_lin_vel_max_schedule "$(IFS=,; echo "${TRACKING_LIN_VEL_MAX_SCHEDULE[*]}")")
-fi
-if (( ${#TRACKING_ANG_VEL_SCHEDULE[@]} > 0 )); then
-  CURRICULUM_ARGS+=(--tracking_ang_vel_schedule "$(IFS=,; echo "${TRACKING_ANG_VEL_SCHEDULE[*]}")")
-fi
 if (( ${#MIXING_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--mixing_schedule "$(IFS=,; echo "${MIXING_SCHEDULE[*]}")")
 fi
@@ -172,20 +159,8 @@ if (( ${#PRIV_REG_COEF_SCHEDULE[@]} > 0 )); then
 fi
 
 GAIT_FREQUENCY_ARGS=()
-if [[ -n "${GAIT_FREQUENCY_MIN}" ]]; then
-  GAIT_FREQUENCY_ARGS+=(--gait_frequency_min "${GAIT_FREQUENCY_MIN}")
-fi
-if [[ -n "${GAIT_FREQUENCY_MAX}" ]]; then
-  GAIT_FREQUENCY_ARGS+=(--gait_frequency_max "${GAIT_FREQUENCY_MAX}")
-fi
-if [[ -n "${GAIT_FREQUENCY_LIN_VEL_REF}" ]]; then
-  GAIT_FREQUENCY_ARGS+=(--gait_frequency_lin_vel_ref "${GAIT_FREQUENCY_LIN_VEL_REF}")
-fi
-if [[ -n "${GAIT_FREQUENCY_ANG_VEL_REF}" ]]; then
-  GAIT_FREQUENCY_ARGS+=(--gait_frequency_ang_vel_ref "${GAIT_FREQUENCY_ANG_VEL_REF}")
-fi
-if [[ -n "${GAIT_FREQUENCY_ANG_VEL_WEIGHT}" ]]; then
-  GAIT_FREQUENCY_ARGS+=(--gait_frequency_ang_vel_weight "${GAIT_FREQUENCY_ANG_VEL_WEIGHT}")
+if [[ "${ENABLE_DYNAMIC_GAIT_FREQUENCY}" == true ]]; then
+  GAIT_FREQUENCY_ARGS+=(--gait_frequency_min "1.2" --gait_frequency_max "2.8")
 fi
 
 ERROR_LOG="${SH_DIR}/error_${RUN_INSTANCE_ID}.log"
