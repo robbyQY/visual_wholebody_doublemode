@@ -106,25 +106,18 @@ def _parse_schedule_arg(value):
     return [float(value)]
 
 def _extract_checkpoint_features(args, env_cfg):
-    observe_gait_commands = False
-    mixed_height_reference = False
-    omnidirectional_pos_y = False
-    ee_goal_obs_mode = "command"
-    if env_cfg is not None:
-        observe_gait_commands = bool(getattr(env_cfg.env, "observe_gait_commands", False))
-        mixed_height_reference = bool(getattr(env_cfg.goal_ee.sphere_center, "mixed_height_reference", False))
-        omnidirectional_pos_y = bool(getattr(env_cfg.goal_ee.ranges, "omnidirectional_pos_y", False))
-        ee_goal_obs_mode = str(getattr(env_cfg.env, "ee_goal_obs_mode", "command"))
-    else:
-        observe_gait_commands = bool(getattr(args, "observe_gait_commands", False))
-        mixed_height_reference = bool(getattr(args, "mixed_height_reference", False))
-        omnidirectional_pos_y = bool(getattr(args, "omnidirectional_pos_y", False))
-        ee_goal_obs_mode = str(getattr(args, "ee_goal_obs_mode", "command"))
+    if env_cfg is None:
+        raise ValueError("env_cfg is required when extracting checkpoint features")
     return {
-        "observe_gait_commands": observe_gait_commands,
-        "mixed_height_reference": mixed_height_reference,
-        "omnidirectional_pos_y": omnidirectional_pos_y,
-        "ee_goal_obs_mode": ee_goal_obs_mode,
+        "observe_gait_commands": bool(env_cfg.env.observe_gait_commands),
+        "mixed_height_reference": bool(env_cfg.goal_ee.sphere_center.mixed_height_reference),
+        "omnidirectional_pos_y": bool(env_cfg.goal_ee.ranges.omnidirectional_pos_y),
+        "ee_goal_obs_mode": str(env_cfg.env.ee_goal_obs_mode),
+        "gait_frequency_min": float(env_cfg.env.gait_frequency_min),
+        "gait_frequency_max": float(env_cfg.env.gait_frequency_max),
+        "gait_frequency_lin_vel_ref": float(env_cfg.env.gait_frequency_lin_vel_ref),
+        "gait_frequency_ang_vel_ref": float(env_cfg.env.gait_frequency_ang_vel_ref),
+        "gait_frequency_ang_vel_weight": float(env_cfg.env.gait_frequency_ang_vel_weight),
     }
 
 def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
@@ -233,6 +226,18 @@ def _parse_bool_from_train_log(log_path, key):
                 value = match.group(1).lower() == "true"
     return value
 
+def _parse_float_from_train_log(log_path, key):
+    if not os.path.isfile(log_path):
+        return None
+    pattern = re.compile(rf"{re.escape(key)}=([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)")
+    value = None
+    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                value = float(match.group(1))
+    return value
+
 def load_run_metadata(log_dir, filename=None):
     preferred_path = get_run_metadata_path(log_dir, filename=filename)
     metadata_candidates = []
@@ -259,6 +264,11 @@ def load_run_metadata(log_dir, filename=None):
     observe_gait_commands = _parse_bool_from_train_log(train_log_path, "OBSERVE_GAIT_COMMANDS")
     mixed_height_reference = _parse_bool_from_train_log(train_log_path, "MIXED_HEIGHT_REFERENCE")
     omnidirectional_pos_y = _parse_bool_from_train_log(train_log_path, "OMNIDIRECTIONAL_POS_Y")
+    gait_frequency_min = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MIN")
+    gait_frequency_max = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MAX")
+    gait_frequency_lin_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_LIN_VEL_REF")
+    gait_frequency_ang_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_REF")
+    gait_frequency_ang_vel_weight = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_WEIGHT")
     ee_goal_obs_mode = None
     if os.path.isfile(train_log_path):
         pattern = re.compile(r"EE_GOAL_OBS_MODE=([A-Za-z0-9_\-]+)")
@@ -275,6 +285,16 @@ def load_run_metadata(log_dir, filename=None):
         checkpoint_features["omnidirectional_pos_y"] = omnidirectional_pos_y
     if ee_goal_obs_mode is not None:
         checkpoint_features["ee_goal_obs_mode"] = ee_goal_obs_mode
+    if gait_frequency_min is not None:
+        checkpoint_features["gait_frequency_min"] = gait_frequency_min
+    if gait_frequency_max is not None:
+        checkpoint_features["gait_frequency_max"] = gait_frequency_max
+    if gait_frequency_lin_vel_ref is not None:
+        checkpoint_features["gait_frequency_lin_vel_ref"] = gait_frequency_lin_vel_ref
+    if gait_frequency_ang_vel_ref is not None:
+        checkpoint_features["gait_frequency_ang_vel_ref"] = gait_frequency_ang_vel_ref
+    if gait_frequency_ang_vel_weight is not None:
+        checkpoint_features["gait_frequency_ang_vel_weight"] = gait_frequency_ang_vel_weight
     if checkpoint_features:
         return {
             "checkpoint_features": checkpoint_features,
@@ -298,15 +318,30 @@ def apply_checkpoint_features_from_run(args, log_dir, verbose=True):
         args.omnidirectional_pos_y = bool(checkpoint_features["omnidirectional_pos_y"])
     if "ee_goal_obs_mode" in checkpoint_features:
         args.ee_goal_obs_mode = str(checkpoint_features["ee_goal_obs_mode"])
+    if "gait_frequency_min" in checkpoint_features:
+        args.gait_frequency_min = float(checkpoint_features["gait_frequency_min"])
+    if "gait_frequency_max" in checkpoint_features:
+        args.gait_frequency_max = float(checkpoint_features["gait_frequency_max"])
+    if "gait_frequency_lin_vel_ref" in checkpoint_features:
+        args.gait_frequency_lin_vel_ref = float(checkpoint_features["gait_frequency_lin_vel_ref"])
+    if "gait_frequency_ang_vel_ref" in checkpoint_features:
+        args.gait_frequency_ang_vel_ref = float(checkpoint_features["gait_frequency_ang_vel_ref"])
+    if "gait_frequency_ang_vel_weight" in checkpoint_features:
+        args.gait_frequency_ang_vel_weight = float(checkpoint_features["gait_frequency_ang_vel_weight"])
 
     if verbose:
         print(
-            "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}, ee_goal_obs_mode={}".format(
+            "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}, ee_goal_obs_mode={}, gait_frequency_min={}, gait_frequency_max={}, gait_frequency_lin_vel_ref={}, gait_frequency_ang_vel_ref={}, gait_frequency_ang_vel_weight={}".format(
                 metadata.get("_source", "<unknown>"),
-                getattr(args, "observe_gait_commands", False),
-                getattr(args, "mixed_height_reference", False),
-                getattr(args, "omnidirectional_pos_y", False),
-                getattr(args, "ee_goal_obs_mode", "command"),
+                getattr(args, "observe_gait_commands", None),
+                getattr(args, "mixed_height_reference", None),
+                getattr(args, "omnidirectional_pos_y", None),
+                getattr(args, "ee_goal_obs_mode", None),
+                getattr(args, "gait_frequency_min", None),
+                getattr(args, "gait_frequency_max", None),
+                getattr(args, "gait_frequency_lin_vel_ref", None),
+                getattr(args, "gait_frequency_ang_vel_ref", None),
+                getattr(args, "gait_frequency_ang_vel_weight", None),
             )
         )
     return args, metadata
@@ -393,6 +428,16 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.action_delay_mode = args.action_delay_mode
         if args.ee_goal_obs_mode is not None:
             env_cfg.env.ee_goal_obs_mode = args.ee_goal_obs_mode
+        if args.gait_frequency_min is not None:
+            env_cfg.env.gait_frequency_min = args.gait_frequency_min
+        if args.gait_frequency_max is not None:
+            env_cfg.env.gait_frequency_max = args.gait_frequency_max
+        if args.gait_frequency_lin_vel_ref is not None:
+            env_cfg.env.gait_frequency_lin_vel_ref = args.gait_frequency_lin_vel_ref
+        if args.gait_frequency_ang_vel_ref is not None:
+            env_cfg.env.gait_frequency_ang_vel_ref = args.gait_frequency_ang_vel_ref
+        if args.gait_frequency_ang_vel_weight is not None:
+            env_cfg.env.gait_frequency_ang_vel_weight = args.gait_frequency_ang_vel_weight
         if args.record_video:
             env_cfg.env.record_video = args.record_video
         if args.stand_by:
@@ -475,7 +520,7 @@ def get_args(test=False):
         {"name": "--load_run", "type": str, "default": "", "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
         {"name": "--checkpoint", "type": int,"default": "-1",  "help": "Saved model checkpoint number. If -1: will load the last checkpoint. Overrides config file if provided."},
         {"name": "--stop_update_goal", "action": "store_true", "help": "stop when update a new ee goal"},
-        {"name": "--observe_gait_commands", "action": "store_true", "help": "if observe gait commands, ref to <walk these ways>"},
+        {"name": "--observe_gait_commands", "action": "store_true", "default": None, "help": "if observe gait commands, ref to <walk these ways>"},
         
         {"name": "--exptid", "type": str,  "required": True if not test else False,  "help": "Experiment ID"},
         {"name": "--debug", "action": "store_true", "default": False, "help": "Disable wandb logging"},
@@ -497,14 +542,19 @@ def get_args(test=False):
         {"name": "--teleop_mode", "action": "store_true", "default": False,  "help": "Enable keyboard teleoperation mode"},
         {"name": "--teleop_input_regularization", "action": "store_true", "default": False, "help": "Preprocess teleop raw commands and arm targets before feeding the policy/control stack"},
         {"name": "--action_delay_mode", "type": str, "choices": ["auto", "undelayed", "delayed"], "help": "Action delay mode for play/teleop: auto keeps the training switch, undelayed always uses the latest action, delayed always uses a one-step delayed action."},
-        {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "default": "command", "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
+        {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
+        {"name": "--gait_frequency_min", "type": float, "help": "Minimum gait clock frequency used when gait commands are enabled."},
+        {"name": "--gait_frequency_max", "type": float, "help": "Maximum gait clock frequency used when gait commands are enabled."},
+        {"name": "--gait_frequency_lin_vel_ref", "type": float, "help": "Linear-velocity reference used to normalize gait-frequency scaling."},
+        {"name": "--gait_frequency_ang_vel_ref", "type": float, "help": "Yaw-rate reference used to normalize gait-frequency scaling."},
+        {"name": "--gait_frequency_ang_vel_weight", "type": float, "help": "Relative yaw-rate contribution in the gait-frequency scaling rule."},
         {"name": "--stand_by", "action": "store_true", "default": False,  "help": "Stand by to play"},
         {"name": "--flat_terrain", "action": "store_true", "default": False,  "help": "Flat the terrain"},
         {"name": "--pitch_control", "action": "store_true", "default": False,  "help": "Control Pitch"},
         {"name": "--vel_obs", "action": "store_true", "default": False,  "help": "Control Pitch"},
-        {"name": "--mixed_height_reference", "action": "store_true", "default": False, "help": "Train both z-invariant and trunk-height-following goal modes"},
+        {"name": "--mixed_height_reference", "action": "store_true", "default": None, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
-        {"name": "--omnidirectional_pos_y", "action": "store_true", "default": False, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
+        {"name": "--omnidirectional_pos_y", "action": "store_true", "default": None, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
         {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},

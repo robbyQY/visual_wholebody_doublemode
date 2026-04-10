@@ -128,7 +128,11 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         record_video = False
         stand_by = False
         observe_gait_commands = False
-        frequencies = 2
+        gait_frequency_min = 2.0
+        gait_frequency_max = 2.0
+        gait_frequency_lin_vel_ref = 0.8
+        gait_frequency_ang_vel_ref = 1.0
+        gait_frequency_ang_vel_weight = 0.35
 
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.5] # x,y,z [m]

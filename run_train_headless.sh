@@ -31,6 +31,13 @@ RDZV_PORT="${RDZV_PORT:-}"
 
 DISABLE_WANDB=false
 OBSERVE_GAIT_COMMANDS=true
+# Leave these empty to keep the config-default fixed gait frequency.
+# Set min/max to different values to enable command-dependent gait frequency.
+GAIT_FREQUENCY_MIN=""
+GAIT_FREQUENCY_MAX=""
+GAIT_FREQUENCY_LIN_VEL_REF=""
+GAIT_FREQUENCY_ANG_VEL_REF=""
+GAIT_FREQUENCY_ANG_VEL_WEIGHT=""
 
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
@@ -164,6 +171,23 @@ if (( ${#PRIV_REG_COEF_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--priv_reg_coef_schedule "$(IFS=,; echo "${PRIV_REG_COEF_SCHEDULE[*]}")")
 fi
 
+GAIT_FREQUENCY_ARGS=()
+if [[ -n "${GAIT_FREQUENCY_MIN}" ]]; then
+  GAIT_FREQUENCY_ARGS+=(--gait_frequency_min "${GAIT_FREQUENCY_MIN}")
+fi
+if [[ -n "${GAIT_FREQUENCY_MAX}" ]]; then
+  GAIT_FREQUENCY_ARGS+=(--gait_frequency_max "${GAIT_FREQUENCY_MAX}")
+fi
+if [[ -n "${GAIT_FREQUENCY_LIN_VEL_REF}" ]]; then
+  GAIT_FREQUENCY_ARGS+=(--gait_frequency_lin_vel_ref "${GAIT_FREQUENCY_LIN_VEL_REF}")
+fi
+if [[ -n "${GAIT_FREQUENCY_ANG_VEL_REF}" ]]; then
+  GAIT_FREQUENCY_ARGS+=(--gait_frequency_ang_vel_ref "${GAIT_FREQUENCY_ANG_VEL_REF}")
+fi
+if [[ -n "${GAIT_FREQUENCY_ANG_VEL_WEIGHT}" ]]; then
+  GAIT_FREQUENCY_ARGS+=(--gait_frequency_ang_vel_weight "${GAIT_FREQUENCY_ANG_VEL_WEIGHT}")
+fi
+
 ERROR_LOG="${SH_DIR}/error_${RUN_INSTANCE_ID}.log"
 
 TRAIN_CMD=(
@@ -173,6 +197,7 @@ TRAIN_CMD=(
   --task "${TASK}"
   "${TRAIN_MODE_ARGS[@]}"
   "${CURRICULUM_ARGS[@]}"
+  "${GAIT_FREQUENCY_ARGS[@]}"
   --train_log_every "${TRAIN_LOG_EVERY}"
   --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}"
 )

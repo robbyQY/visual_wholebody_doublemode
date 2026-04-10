@@ -233,7 +233,7 @@ class ManipLoco(LeggedRobot):
         """
         if self.cfg.env.teleop_mode:
             self._update_effective_teleop_inputs()
-        ee_goal_obs_mode = getattr(self.cfg.env, "ee_goal_obs_mode", "command")
+        ee_goal_obs_mode = self.cfg.env.ee_goal_obs_mode
         if ee_goal_obs_mode == "command":
             # Match the goal-sampling command semantics used by newer checkpoints.
             ee_goal_local_cart = self.curr_ee_goal_cart
@@ -885,6 +885,8 @@ class ManipLoco(LeggedRobot):
                                                   requires_grad=False, )
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
                                         requires_grad=False)
+        self.gait_frequencies = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                            requires_grad=False)
         self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
                                         requires_grad=False)
         self.doubletime_clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
@@ -1056,13 +1058,13 @@ class ManipLoco(LeggedRobot):
 
     def _step_contact_targets(self):
         if self.cfg.env.observe_gait_commands:
-            frequencies = self.cfg.env.frequencies
+            frequencies, walking_mask = self._get_gait_frequencies()
             phases = 0.5
             offsets = 0
             bounds = 0
             durations = 0.5
             self.gait_indices = torch.remainder(self.gait_indices + self.dt * frequencies, 1.0)
-            self.gait_indices[~self._get_walking_cmd_mask()] = 0
+            self.gait_indices[~walking_mask] = 0
 
             foot_indices = [self.gait_indices + phases + offsets + bounds,
                             self.gait_indices + offsets,
@@ -1124,6 +1126,26 @@ class ManipLoco(LeggedRobot):
             self.desired_contact_states[:, 1] = smoothing_multiplier_FR
             self.desired_contact_states[:, 2] = smoothing_multiplier_RL
             self.desired_contact_states[:, 3] = smoothing_multiplier_RR
+
+    def _get_gait_frequencies(self):
+        min_frequency = float(self.cfg.env.gait_frequency_min)
+        max_frequency = float(self.cfg.env.gait_frequency_max)
+        if max_frequency < min_frequency:
+            min_frequency, max_frequency = max_frequency, min_frequency
+
+        lin_vel_ref = max(float(self.cfg.env.gait_frequency_lin_vel_ref), 1e-6)
+        ang_vel_ref = max(float(self.cfg.env.gait_frequency_ang_vel_ref), 1e-6)
+        ang_vel_weight = max(float(self.cfg.env.gait_frequency_ang_vel_weight), 0.0)
+
+        lin_cmd_level = torch.norm(self.commands[:, :2], dim=1) / lin_vel_ref
+        yaw_cmd_level = torch.abs(self.commands[:, 2]) / ang_vel_ref
+        gait_level = torch.clamp(lin_cmd_level + ang_vel_weight * yaw_cmd_level, 0.0, 1.0)
+
+        frequencies = min_frequency + (max_frequency - min_frequency) * gait_level
+        walking_mask = self._get_walking_cmd_mask()
+        frequencies = torch.where(walking_mask, frequencies, torch.zeros_like(frequencies))
+        self.gait_frequencies[:] = frequencies
+        return frequencies, walking_mask
     
     def _post_physics_step_callback(self):
         """ Callback called before computing terminations, rewards, and observations
