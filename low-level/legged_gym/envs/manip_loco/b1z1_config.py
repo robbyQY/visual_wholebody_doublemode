@@ -57,6 +57,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             pos_p = [-1 * np.pi / 2.5, 1 * np.pi / 3]
             pos_y = [-1.2, 1.2]  # relative yaw offset from the episode start yaw when omnidirectional_pos_y is enabled
             omnidirectional_pos_y = False
+            omnidirectional_init_pos_y = [-5 * np.pi / 6, 5 * np.pi / 6]  # reset-time absolute yaw range before intersecting with the Z1 waist joint limits
             
             delta_orn_r = [-0.5, 0.5]
             delta_orn_p = [-0.5, 0.5]

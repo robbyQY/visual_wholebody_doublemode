@@ -28,6 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import inspect
 import sys
 from isaacgym import gymapi
 from isaacgym import gymutil
@@ -93,6 +94,7 @@ class BaseTask():
         # todo: read from config
         self.enable_viewer_sync = True
         self.viewer = None
+        self.manual_reset_requested = False
 
         # if running with a viewer, set up keyboard shortcuts and camera
         if self.headless == False:
@@ -121,6 +123,8 @@ class BaseTask():
         for i in range(min(9, self.num_envs)):
             self.gym.subscribe_viewer_keyboard_event(
             self.viewer, getattr(gymapi, "KEY_"+str(i)), "lookat"+str(i))
+        self.gym.subscribe_viewer_keyboard_event(
+            self.viewer, gymapi.KEY_9, "reset_all")
         self.gym.subscribe_viewer_keyboard_event(
             self.viewer, gymapi.KEY_LEFT_BRACKET, "prev_id")
         self.gym.subscribe_viewer_keyboard_event(
@@ -153,9 +157,25 @@ class BaseTask():
 
     def reset(self):
         """ Reset all robots"""
-        self.reset_idx(torch.arange(self.num_envs, device=self.device), start=True)
+        self.reset_all_envs(start=True)
         obs, privileged_obs, *_ = self.step(torch.zeros(self.num_envs, self.num_actions, device=self.device, requires_grad=False))
         return obs, privileged_obs
+
+    def request_manual_reset(self):
+        self.manual_reset_requested = True
+
+    def consume_manual_reset_request(self):
+        requested = self.manual_reset_requested
+        self.manual_reset_requested = False
+        return requested
+
+    def reset_all_envs(self, start=True):
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        reset_signature = inspect.signature(self.reset_idx)
+        if "start" in reset_signature.parameters:
+            self.reset_idx(env_ids, start=start)
+        else:
+            self.reset_idx(env_ids)
 
     def step(self, actions):
         raise NotImplementedError
@@ -206,6 +226,9 @@ class BaseTask():
             sys.exit()
         elif evt.action == "toggle_viewer_sync" and evt.value > 0:
             self.enable_viewer_sync = not self.enable_viewer_sync
+        elif evt.action == "reset_all" and evt.value > 0:
+            self.request_manual_reset()
+            print("[viewer] manual reset requested for all environments")
 
         if not self.free_cam:
             for i in range(min(9, self.num_envs)):

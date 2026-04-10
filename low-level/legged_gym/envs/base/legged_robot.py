@@ -88,6 +88,9 @@ class LeggedRobot(BaseTask):
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
         # step physics and render each frame
         self.render()
+        if self.consume_manual_reset_request():
+            self.reset_all_envs(start=True)
+            self.actions.zero_()
         for _ in range(self.cfg.control.decimation):
             self.torques = self._compute_torques(self.actions).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
