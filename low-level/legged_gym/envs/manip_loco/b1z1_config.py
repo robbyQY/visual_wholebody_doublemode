@@ -43,12 +43,19 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         command_mode = 'sphere'
         arm_induced_pitch = 0.38 # Added to -pos_p (negative goal pitch) to get default eef orn_p
 
+        class urdf_mount:
+            # Keep URDF-derived arm mounting parameters together so a URDF swap only needs edits here.
+            arm_base_offset = [0.3, 0.0, 0.09]  # base -> link00
+            z1_waist_offset_z = 0.0585  # link00 -> z1_waist
+            z1_shoulder_offset_z = 0.045  # link01 -> z1_shoulder
+
         class sphere_center:
             x_offset = 0.3 # Relative to base
             y_offset = 0 # Relative to base
             z_invariant_offset = 0.7 # Relative to terrain
             mixed_height_reference = False # If true, train both z-invariant and trunk-height-following goal modes, with a mode bit in observations
             trunk_follow_ratio = 0.5 # Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled
+            trunk_follow_anchor = "z1_waist" # arm_base | z1_waist | z1_shoulder
 
         class ranges:
             init_pos_start = [0.5, np.pi/8, 0]

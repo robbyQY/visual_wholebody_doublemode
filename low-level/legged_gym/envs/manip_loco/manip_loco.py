@@ -99,13 +99,7 @@ class ManipLoco(LeggedRobot):
                 actions = self.action_history_buf[:, -2]
 
         self.actions = actions.clone()
-        
-        # arm ik actions
-        # uncomment this if needing to mask out gripper joints
-        # self.curr_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
-        # ee_goal_cart_yaw_global = quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
-        # curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + ee_goal_cart_yaw_global
-        
+
         dpos = self.curr_ee_goal_cart_world - self.ee_pos
         drot = orientation_error(self.ee_goal_orn_quat, self.ee_orn / torch.norm(self.ee_orn, dim=-1).unsqueeze(-1))
         dpose = torch.cat([dpos, drot], -1).unsqueeze(-1)
@@ -232,7 +226,10 @@ class ManipLoco(LeggedRobot):
         self.arm_rew_buf /= 100
 
     def compute_observations(self):
-        """ Computes observations
+        """Computes policy observations.
+
+        `ee_goal_local_cart` is always expressed in the robot body frame.
+        It is either the commanded offset directly, or the world target re-expressed relative to the arm base.
         """
         if self.cfg.env.teleop_mode:
             self._update_effective_teleop_inputs()
@@ -242,7 +239,7 @@ class ManipLoco(LeggedRobot):
             ee_goal_local_cart = self.curr_ee_goal_cart
         elif ee_goal_obs_mode == "arm_base_target":
             # Legacy checkpoints observed the world target relative to the arm base.
-            arm_base_pos = self.base_pos + quat_apply(self.base_yaw_quat, self.arm_base_offset)
+            arm_base_pos = self._get_arm_base_world_pos()
             ee_goal_local_cart = quat_rotate_inverse(self.base_quat, self.curr_ee_goal_cart_world - arm_base_pos)
         else:
             raise ValueError(f"Unsupported ee_goal_obs_mode: {ee_goal_obs_mode}")
@@ -774,7 +771,17 @@ class ManipLoco(LeggedRobot):
         self.dof_vel_wo_gripper = self.dof_vel[:, :-self.cfg.env.num_gripper_joints]
         self.base_quat = self.root_states[:, 3:7]
         self.base_pos = self.root_states[:, :3]
-        self.arm_base_offset = torch.tensor([0.3, 0., 0.09], device=self.device, dtype=torch.float).repeat(self.num_envs, 1)
+        urdf_mount_cfg = self.cfg.goal_ee.urdf_mount
+        self.arm_base_offset = torch.tensor(
+            urdf_mount_cfg.arm_base_offset,
+            device=self.device,
+            dtype=torch.float
+        ).repeat(self.num_envs, 1)
+        # Keep URDF-derived joint heights centralized in config.
+        self.arm_waist_offset = self.arm_base_offset.clone()
+        self.arm_waist_offset[:, 2] += urdf_mount_cfg.z1_waist_offset_z
+        self.arm_shoulder_offset = self.arm_waist_offset.clone()
+        self.arm_shoulder_offset[:, 2] += urdf_mount_cfg.z1_shoulder_offset_z
         # self.yaw_ema = euler_from_quat(self.base_quat)[2]
         base_yaw = euler_from_quat(self.base_quat)[2]
         self.base_yaw_euler = torch.cat([torch.zeros(self.num_envs, 2, device=self.device), base_yaw.view(-1, 1)], dim=1)
@@ -857,7 +864,7 @@ class ManipLoco(LeggedRobot):
         self.goal_height_follow_mask = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.goal_height_follow_override = None
         
-        self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
+        self.curr_ee_goal_cart_world = self.transform_goal_local_to_world(self.get_goal_center_offset_local() + self.curr_ee_goal_cart)
 
         if self.is_main_process:
             print('------------------------------------------------------')
@@ -1293,29 +1300,106 @@ class ManipLoco(LeggedRobot):
         else:
             return body_angles
 
-    def _draw_collision_bbox(self):
+    def get_goal_reference_quat(self):
+        """Returns the goal-reference orientation in world coordinates.
 
-        center = self.ee_goal_center_offset
+        The returned quaternion maps vectors from the goal local frame to world.
+        z-invariant uses yaw-only; trunk-follow uses the full trunk 6DoF orientation.
+        """
+        if not self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            return self.base_yaw_quat
+        return torch.where(self.goal_height_follow_mask.unsqueeze(1), self.base_quat, self.base_yaw_quat)
+
+    def get_goal_reference_origin(self):
+        """Returns the goal-reference origin in world coordinates.
+
+        z-invariant uses `(root_x, root_y, 0)`.
+        trunk-follow uses the full root position `root_states[:, :3]`.
+        """
+        invariant_origin = torch.cat(
+            [self.root_states[:, :2], torch.zeros(self.num_envs, 1, device=self.device)],
+            dim=1,
+        )
+        if not self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            return invariant_origin
+        return torch.where(self.goal_height_follow_mask.unsqueeze(1), self.root_states[:, :3], invariant_origin)
+
+    def get_goal_center_offset_local(self):
+        """Returns the target-center offset in the goal local frame.
+
+        In z-invariant mode this is the sphere-center config offset.
+        In trunk-follow mode this switches to the configured URDF anchor: arm base, waist, or shoulder.
+        """
+        if not self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            return self.ee_goal_center_offset
+        trunk_follow_anchor = getattr(self.cfg.goal_ee.sphere_center, "trunk_follow_anchor", "z1_shoulder")
+        if trunk_follow_anchor == "arm_base":
+            trunk_follow_center_offset = self.arm_base_offset
+        elif trunk_follow_anchor == "z1_waist":
+            trunk_follow_center_offset = self.arm_waist_offset
+        elif trunk_follow_anchor == "z1_shoulder":
+            trunk_follow_center_offset = self.arm_shoulder_offset
+        else:
+            raise ValueError(f"Unsupported trunk_follow_anchor: {trunk_follow_anchor}")
+        return torch.where(
+            self.goal_height_follow_mask.unsqueeze(1),
+            trunk_follow_center_offset,
+            self.ee_goal_center_offset,
+        )
+
+    def transform_goal_local_to_world(self, local_points):
+        """Maps points from the goal local frame to world coordinates."""
+        return self.get_goal_reference_origin() + quat_apply(self.get_goal_reference_quat(), local_points)
+
+    def get_ee_goal_spherical_center(self):
+        """Returns the cyan-sphere center in world coordinates."""
+        return self.transform_goal_local_to_world(self.get_goal_center_offset_local())
+
+    def _get_arm_base_world_pos(self):
+        """Returns the arm-base origin in world coordinates.
+
+        This is the URDF `link00` mounting point attached to the robot base/trunk.
+        """
+        arm_base_quat = self.base_yaw_quat
+        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
+            arm_base_quat = torch.where(self.goal_height_follow_mask.unsqueeze(1), self.base_quat, self.base_yaw_quat)
+        return self.base_pos + quat_apply(arm_base_quat, self.arm_base_offset)
+
+    def _draw_collision_bbox(self):
+        """Draws the red forbidden box in world coordinates.
+
+        The box corners are defined by `collision_lower_limits/upper_limits` in the goal local frame,
+        then transformed into world with the active goal reference frame.
+        """
+
+        center = self.get_goal_center_offset_local()
         bbox0 = center + self.collision_upper_limits
         bbox1 = center + self.collision_lower_limits
         bboxes = torch.stack([bbox0, bbox1], dim=1)
         sphere_geom = gymutil.WireframeSphereGeometry(0.05, 4, 4, None, color=(1, 1, 0))
+        goal_ref_origin = self.get_goal_reference_origin()
+        goal_ref_quat = self.get_goal_reference_quat()
 
         for i in range(self.num_envs):
             bbox_geom = gymutil.WireframeBBoxGeometry(bboxes[i], None, color=(1, 0, 0))
-            quat = self.base_yaw_quat[i]
+            quat = goal_ref_quat[i]
             r = gymapi.Quat(quat[0], quat[1], quat[2], quat[3])
-            pose0 = gymapi.Transform(gymapi.Vec3(self.root_states[i, 0], self.root_states[i, 1], 0), r=r)
+            pose0 = gymapi.Transform(gymapi.Vec3(goal_ref_origin[i, 0], goal_ref_origin[i, 1], goal_ref_origin[i, 2]), r=r)
             gymutil.draw_lines(bbox_geom, self.gym, self.viewer, self.envs[i], pose=pose0) 
 
     def _draw_ee_goal_curr(self):
-        """ Draws visualizations for dubugging (slows down simulation a lot).
-            Default behaviour: draws height measurement points
+        """Draws the current goal markers in world coordinates.
+
+        Yellow = current EE target point in world.
+        Cyan = goal-frame center in world.
+        White = root/base pose in world.
+        Blue = measured gripper position in world.
         """
         sphere_geom = gymutil.WireframeSphereGeometry(0.05, 4, 4, None, color=(1, 1, 0))
+        sphere_geom_root = gymutil.WireframeSphereGeometry(0.06, 16, 16, None, color=(1, 1, 1))
 
         sphere_geom_3 = gymutil.WireframeSphereGeometry(0.05, 16, 16, None, color=(0, 1, 1))
-        upper_arm_pose = self._get_ee_goal_spherical_center()
+        upper_arm_pose = self.get_ee_goal_spherical_center()
 
         sphere_geom_2 = gymutil.WireframeSphereGeometry(0.05, 4, 4, None, color=(0, 0, 1))
         ee_pose = self.rigid_body_state[:, self.gripper_idx, :3]
@@ -1336,21 +1420,31 @@ class ManipLoco(LeggedRobot):
             sphere_pose_3 = gymapi.Transform(gymapi.Vec3(upper_arm_pose[i, 0], upper_arm_pose[i, 1], upper_arm_pose[i, 2]), r=None)
             gymutil.draw_lines(sphere_geom_3, self.gym, self.viewer, self.envs[i], sphere_pose_3) 
 
+            root_pose = gymapi.Transform(
+                gymapi.Vec3(self.root_states[i, 0], self.root_states[i, 1], self.root_states[i, 2]),
+                r=gymapi.Quat(self.base_quat[i, 0], self.base_quat[i, 1], self.base_quat[i, 2], self.base_quat[i, 3])
+            )
+            gymutil.draw_lines(sphere_geom_root, self.gym, self.viewer, self.envs[i], root_pose)
+            gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[i], root_pose)
+
             pose = gymapi.Transform(gymapi.Vec3(self.curr_ee_goal_cart_world[i, 0], self.curr_ee_goal_cart_world[i, 1], self.curr_ee_goal_cart_world[i, 2]), 
                                     r=gymapi.Quat(self.ee_goal_orn_quat[i, 0], self.ee_goal_orn_quat[i, 1], self.ee_goal_orn_quat[i, 2], self.ee_goal_orn_quat[i, 3]))
             gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[i], pose)
 
     def _draw_ee_goal_traj(self):
+        """Draws the sampled EE goal trajectory in world coordinates."""
         sphere_geom = gymutil.WireframeSphereGeometry(0.005, 8, 8, None, color=(1, 0, 0))
         sphere_geom_yellow = gymutil.WireframeSphereGeometry(0.01, 16, 16, None, color=(1, 1, 0))
 
         t = torch.linspace(0, 1, 10, device=self.device)[None, None, None, :]
         ee_target_all_sphere = torch.lerp(self.ee_start_sphere[..., None], self.ee_goal_sphere[..., None], t).squeeze(0)
         ee_target_all_cart_world = torch.zeros_like(ee_target_all_sphere)
+        goal_ref_quat = self.get_goal_reference_quat()
+        goal_ref_center = self.get_ee_goal_spherical_center()
         for i in range(10):
             ee_target_cart = sphere2cart(ee_target_all_sphere[..., i])
-            ee_target_all_cart_world[..., i] = quat_apply(self.base_yaw_quat, ee_target_cart)
-        ee_target_all_cart_world += self._get_ee_goal_spherical_center()[:, :, None]
+            ee_target_all_cart_world[..., i] = quat_apply(goal_ref_quat, ee_target_cart)
+        ee_target_all_cart_world += goal_ref_center[:, :, None]
         for i in range(self.num_envs):
             for j in range(10):
                 pose = gymapi.Transform(gymapi.Vec3(ee_target_all_cart_world[i, 0, j], ee_target_all_cart_world[i, 1, j], ee_target_all_cart_world[i, 2, j]), r=None)
@@ -1497,6 +1591,11 @@ class ManipLoco(LeggedRobot):
             self.goal_timer[init_env_ids] = 0.0
 
     def _collision_check(self, env_ids):
+        """Rejects EE trajectories that enter the forbidden box in goal local coordinates.
+
+        The interpolated path is sampled in the goal local frame, then compared against
+        `collision_lower_limits/upper_limits` and `underground_limit`.
+        """
         ee_target_all_sphere = torch.lerp(self.ee_start_sphere[env_ids, ..., None], self.ee_goal_sphere[env_ids, ...,  None], self.collision_check_t).squeeze(-1)
         ee_target_cart = sphere2cart(torch.permute(ee_target_all_sphere, (2, 0, 1)).reshape(-1, 3)).reshape(self.num_collision_check_samples, -1, 3)
         collision_mask = torch.any(torch.logical_and(torch.all(ee_target_cart < self.collision_upper_limits, dim=-1), torch.all(ee_target_cart > self.collision_lower_limits, dim=-1)), dim=0)
@@ -1510,6 +1609,12 @@ class ManipLoco(LeggedRobot):
         self._update_effective_teleop_inputs()
 
     def _update_curr_ee_goal(self):
+        """Updates the end-effector target.
+
+        `curr_ee_goal_cart` stays in the goal local frame.
+        `curr_ee_goal_cart_world` is the yellow target point in world coordinates.
+        `ee_goal_orn_quat` is the target orientation in world coordinates.
+        """
         if not self.cfg.env.teleop_mode:
             t = torch.clip(self.goal_timer / self.traj_timesteps, 0, 1)
             self.curr_ee_goal_sphere[:] = torch.lerp(self.ee_start_sphere, self.ee_goal_sphere, t[:, None])
@@ -1519,13 +1624,18 @@ class ManipLoco(LeggedRobot):
         # TODO: for the teleop mode, we need to directly update self.curr_ee_goal_cart using VR controller.
         if not self.cfg.env.teleop_mode:
             self.curr_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
-        ee_goal_cart_yaw_global = quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
-        self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + ee_goal_cart_yaw_global
+        goal_ref_quat = self.get_goal_reference_quat()
+        self.curr_ee_goal_cart_world = self.transform_goal_local_to_world(self.get_goal_center_offset_local() + self.curr_ee_goal_cart)
         
         # TODO: for the teleop mode, we need to directly update self.ee_goal_orn_quat using VR controller.
-        default_yaw = torch.atan2(ee_goal_cart_yaw_global[:, 1], ee_goal_cart_yaw_global[:, 0])
         default_pitch = -self.curr_ee_goal_sphere[:, 1] + self.cfg.goal_ee.arm_induced_pitch
-        self.ee_goal_orn_quat = quat_from_euler_xyz(self.ee_goal_orn_delta_rpy[:, 0] + np.pi / 2, default_pitch + self.ee_goal_orn_delta_rpy[:, 1], self.ee_goal_orn_delta_rpy[:, 2] + default_yaw)
+        local_goal_orn = quat_from_euler_xyz(
+            self.ee_goal_orn_delta_rpy[:, 0] + np.pi / 2,
+            default_pitch + self.ee_goal_orn_delta_rpy[:, 1],
+            self.ee_goal_orn_delta_rpy[:, 2] + self.curr_ee_goal_sphere[:, 2],
+        )
+        self.ee_goal_orn_quat = quat_mul(goal_ref_quat, local_goal_orn)
+        self.ee_goal_orn_euler = torch.stack(euler_from_quat(self.ee_goal_orn_quat), dim=-1)
         
         self.goal_timer += 1
         resample_id = (self.goal_timer > self.traj_total_timesteps).nonzero(as_tuple=False).flatten()
@@ -1539,16 +1649,6 @@ class ManipLoco(LeggedRobot):
                 self.teleop_raw_commands[resample_id, 2] = 0
 
         self._resample_ee_goal(resample_id)
-    
-    def _get_ee_goal_spherical_center(self):
-        if self.cfg.goal_ee.sphere_center.mixed_height_reference:
-            trunk_height_delta = (self.root_states[:, 2:3] - self.cfg.init_state.pos[2]) * self.goal_height_follow_mask.unsqueeze(1)
-            center_z = trunk_height_delta
-        else:
-            center_z = torch.zeros(self.num_envs, 1, device=self.device)
-        center = torch.cat([self.root_states[:, :2], center_z], dim=1)
-        center = center + quat_apply(self.base_yaw_quat, self.ee_goal_center_offset)
-        return center
 
     def _get_walking_cmd_mask(self, env_ids=None, return_all=False):
         if env_ids is None:
