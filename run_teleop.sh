@@ -74,7 +74,7 @@ SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 HEADLESS=false
 TELEOP_INPUT_REGULARIZATION=false
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
-EE_GOAL_OBS_MODE="command"  # command | arm_base_target (official ckpt)
+EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
@@ -93,5 +93,5 @@ python "b1z1_interface.py" \
   --teleop_mode \
   $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
-  --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}" \
+  $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)

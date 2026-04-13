@@ -25,6 +25,7 @@ OBSERVE_GAIT_COMMANDS=true
 MIXED_HEIGHT_REFERENCE=false
 TRUNK_FOLLOW_RATIO="0.5"
 OMNIDIRECTIONAL_POS_Y=false
+MOUNT_DEG="0"              # 0 | 90 | 180 | 270
 ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
 
 # Curriculum schedules
@@ -193,6 +194,7 @@ TRAIN_CMD=(
   "${GAIT_FREQUENCY_ARGS[@]}"
   --train_log_every "${TRAIN_LOG_EVERY}"
   --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}"
+  --mount_deg "${MOUNT_DEG}"
 )
 
 if [[ "${OBSERVE_GAIT_COMMANDS}" == true ]]; then

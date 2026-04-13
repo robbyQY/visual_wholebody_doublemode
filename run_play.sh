@@ -7,12 +7,6 @@ set -euo pipefail
 #   2. viewer 窗口必须处于焦点状态
 #      如果终端或别的窗口在前台，按键不会发送给仿真器。
 #
-# play 模式说明:
-#   1. 使用 `play.py`
-#   2. 不开启 `TELEOP_MODE`
-#   3. 底盘 / 机械臂 / 夹爪的 teleop 控制按键在这里都无效
-#   4. command / EE-goal 的自动采样语义会尽量从训练 run metadata 中恢复
-#
 # 在 play 模式下仍然有效的 viewer / 仿真器按键:
 #   ESC : 退出程序
 #   SPACE : 暂停/继续仿真
@@ -43,7 +37,7 @@ SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 
 HEADLESS=false
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
-EE_GOAL_OBS_MODE="command"  # command | arm_base_target (official ckpt)
+EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
@@ -60,5 +54,5 @@ python "play.py" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
-  --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}" \
+  $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)

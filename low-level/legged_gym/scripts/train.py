@@ -39,7 +39,7 @@ import torch.distributed as dist
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from legged_gym.envs import *
 from legged_gym.utils import get_args, task_registry, class_to_dict
-from legged_gym.utils.helpers import load_run_metadata, save_run_metadata, update_run_metadata, get_run_log_dir, update_cfg_from_args, _extract_checkpoint_features
+from legged_gym.utils.helpers import load_run_metadata, save_run_metadata, update_run_metadata, get_run_log_dir, update_cfg_from_args, _extract_checkpoint_features, apply_checkpoint_features_from_run
 import torch
 import wandb
 
@@ -236,6 +236,7 @@ def log_training_header(args, log_pth, num_gpus, env_cfg=None):
     print(f"MIXED_HEIGHT_REFERENCE={env_cfg.goal_ee.sphere_center.mixed_height_reference}")
     print(f"TRUNK_FOLLOW_RATIO={env_cfg.goal_ee.sphere_center.trunk_follow_ratio}")
     print(f"OMNIDIRECTIONAL_POS_Y={env_cfg.goal_ee.ranges.omnidirectional_pos_y}")
+    print(f"MOUNT_DEG={_extract_checkpoint_features(args, env_cfg).get('mount_deg', 0)}")
     print(f"EE_GOAL_OBS_MODE={env_cfg.env.ee_goal_obs_mode}")
     print(f"GAIT_FREQUENCY_MIN={env_cfg.env.gait_frequency_min}")
     print(f"GAIT_FREQUENCY_MAX={env_cfg.env.gait_frequency_max}")
@@ -244,59 +245,6 @@ def log_training_header(args, log_pth, num_gpus, env_cfg=None):
     print(f"GAIT_FREQUENCY_ANG_VEL_WEIGHT={env_cfg.env.gait_frequency_ang_vel_weight}")
     print(f"START_TIME={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("")
-
-def validate_resume_checkpoint_features(args, log_pth, env_cfg=None):
-    if args.rank != 0:
-        return
-    metadata = load_run_metadata(log_pth, filename=getattr(args, "run_metadata_filename", None))
-    if metadata is None:
-        print(f"Warning: no run metadata found under {log_pth}; skip resume feature compatibility checks.")
-        return
-
-    checkpoint_features = metadata.get("checkpoint_features", {})
-    source = metadata.get("_source", "<unknown>")
-    current_features = _extract_checkpoint_features(args, env_cfg)
-
-    strict_features = (
-        "observe_gait_commands",
-        "mixed_height_reference",
-        "ee_goal_obs_mode",
-        "gait_frequency_min",
-        "gait_frequency_max",
-        "gait_frequency_lin_vel_ref",
-        "gait_frequency_ang_vel_ref",
-        "gait_frequency_ang_vel_weight",
-    )
-    for feature_name in strict_features:
-        if feature_name not in checkpoint_features:
-            print(f"Warning: resume feature `{feature_name}` missing from {source}; skip compatibility check for it.")
-            continue
-        current_value = current_features.get(feature_name)
-        if feature_name == "ee_goal_obs_mode":
-            current_value = str(current_value)
-            previous_value = str(checkpoint_features[feature_name])
-        elif feature_name.startswith("gait_frequency_"):
-            current_value = float(current_value)
-            previous_value = float(checkpoint_features[feature_name])
-        else:
-            current_value = bool(current_value)
-            previous_value = bool(checkpoint_features[feature_name])
-        assert current_value == previous_value, (
-            f"Resume feature mismatch for `{feature_name}`: current={current_value}, previous={previous_value} "
-            f"(from {source}). Update run_train_headless.sh or resume from a compatible run."
-        )
-
-    if "omnidirectional_pos_y" in checkpoint_features:
-        current_value = bool(current_features["omnidirectional_pos_y"])
-        previous_value = bool(checkpoint_features["omnidirectional_pos_y"])
-        if current_value != previous_value:
-            print(
-                "Warning: resume feature mismatch for `omnidirectional_pos_y`: "
-                f"current={current_value}, previous={previous_value} (from {source}). "
-                "Proceeding with the current configuration."
-            )
-    else:
-        print(f"Warning: resume feature `omnidirectional_pos_y` missing from {source}; proceeding with the current configuration.")
 
 def setup_distributed(args):
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -326,11 +274,16 @@ def train(args):
     if args.rank == 0 and args.log_file_path:
         sys.stdout = TimestampedTee(sys.stdout, args.log_file_path, args.rank)
         sys.stderr = TimestampedTee(sys.stderr, args.log_file_path, args.rank)
+    if getattr(args, "effective_train_mode", getattr(args, "train_mode", "fresh")) == "resume":
+        args, _ = apply_checkpoint_features_from_run(
+            args,
+            log_pth,
+            verbose=args.rank == 0,
+            filename=getattr(args, "run_metadata_filename", None),
+        )
     env_cfg_preview, _ = task_registry.get_cfgs(args.task)
     env_cfg_preview, _ = update_cfg_from_args(env_cfg_preview, None, args)
     log_training_header(args, log_pth, args.world_size if args.distributed else 1, env_cfg_preview)
-    if getattr(args, "effective_train_mode", getattr(args, "train_mode", "fresh")) == "resume":
-        validate_resume_checkpoint_features(args, log_pth, env_cfg_preview)
     if args.debug:
         mode = "disabled"
         args.rows = 6

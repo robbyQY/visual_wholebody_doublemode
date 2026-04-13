@@ -22,6 +22,7 @@ IsaacGymEnvs/
 **/.pytest_cache
 **/.vscode
 **/legged_gym/logs
+low-level/resources/robots/b1z1/urdf/generated/
 
 # Node artifact files
 node_modules/

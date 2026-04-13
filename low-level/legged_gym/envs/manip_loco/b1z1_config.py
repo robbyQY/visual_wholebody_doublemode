@@ -46,6 +46,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         class urdf_mount:
             # Keep URDF-derived arm mounting parameters together so a URDF swap only needs edits here.
             arm_base_offset = [0.3, 0.0, 0.09]  # base -> link00
+            mount_yaw_offset = 0.0  # rad, base frame -> arm mounting frame yaw offset
             z1_waist_offset_z = 0.0585  # link00 -> z1_waist
             z1_shoulder_offset_z = 0.045  # link01 -> z1_shoulder
 

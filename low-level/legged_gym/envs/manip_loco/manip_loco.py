@@ -791,6 +791,7 @@ class ManipLoco(LeggedRobot):
         base_yaw = euler_from_quat(self.base_quat)[2]
         self.base_yaw_euler = torch.cat([torch.zeros(self.num_envs, 2, device=self.device), base_yaw.view(-1, 1)], dim=1)
         self.base_yaw_quat = quat_from_euler_xyz(torch.tensor(0), torch.tensor(0), base_yaw)
+        self.arm_mount_yaw_offset = float(getattr(urdf_mount_cfg, "mount_yaw_offset", 0.0))
 
         self.obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, self.cfg.env.num_proprio, device=self.device, dtype=torch.float)
         self.action_history_buf = torch.zeros(self.num_envs, self.action_delay + 2, self.num_actions, device=self.device, dtype=torch.float)
@@ -842,6 +843,7 @@ class ManipLoco(LeggedRobot):
         self.init_start_ee_sphere = torch.tensor(self.cfg.goal_ee.ranges.init_pos_start, device=self.device).unsqueeze(0)
         self.init_end_ee_sphere = torch.tensor(self.cfg.goal_ee.ranges.init_pos_end, device=self.device).unsqueeze(0)
         self.reset_init_ee_sphere = self.init_start_ee_sphere.repeat(self.num_envs, 1)
+        self.reset_init_arm_waist_yaw = torch.zeros(self.num_envs, device=self.device)
         self.omnidirectional_pos_y = bool(self.cfg.goal_ee.ranges.omnidirectional_pos_y)
         self.omnidirectional_rear_transition_pos_y_abs = float(self.cfg.goal_ee.ranges.omnidirectional_rear_transition_pos_y_abs)
         if not (0.0 <= self.omnidirectional_rear_transition_pos_y_abs < np.pi):
@@ -1018,7 +1020,7 @@ class ManipLoco(LeggedRobot):
         if self.omnidirectional_pos_y:
             arm_slice = slice(self.arm_dof_start_idx, self.arm_dof_end_idx)
             self.dof_pos[env_ids, arm_slice] = self.default_dof_pos[arm_slice]
-            self.dof_pos[env_ids, self.arm_waist_idx] = self.reset_init_ee_sphere[env_ids, 2]
+            self.dof_pos[env_ids, self.arm_waist_idx] = self.reset_init_arm_waist_yaw[env_ids]
         self.dof_vel[env_ids] = 0.
         self.gripper_pos_targets[env_ids] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
         self.teleop_arm_joint_pos_targets[env_ids] = self.dof_pos[env_ids, self.arm_dof_start_idx:self.arm_dof_end_idx]
@@ -1029,11 +1031,13 @@ class ManipLoco(LeggedRobot):
 
     def _prepare_reset_initial_arm_pose(self, env_ids):
         self.reset_init_ee_sphere[env_ids] = self.init_start_ee_sphere.repeat(len(env_ids), 1)
+        self.reset_init_ee_sphere[env_ids, 2] = wrap_to_pi(self.reset_init_ee_sphere[env_ids, 2] + self.arm_mount_yaw_offset)
         if not self.omnidirectional_pos_y:
             return
 
         sampled_yaw = self._sample_omnidirectional_reset_yaw(env_ids)
-        self.reset_init_ee_sphere[env_ids, 2] = sampled_yaw
+        self.reset_init_arm_waist_yaw[env_ids] = sampled_yaw
+        self.reset_init_ee_sphere[env_ids, 2] = wrap_to_pi(sampled_yaw + self.arm_mount_yaw_offset)
 
     def _sample_omnidirectional_reset_yaw(self, env_ids):
         yaw_min = float(self.arm_waist_reset_limits[0].item())
@@ -1537,12 +1541,13 @@ class ManipLoco(LeggedRobot):
 
     def _sample_ee_goal_yaw(self, env_ids, reference_yaw=None):
         if not self.omnidirectional_pos_y:
-            return torch_rand_float(
+            sampled_yaw = torch_rand_float(
                 self.goal_ee_ranges["pos_y"][0],
                 self.goal_ee_ranges["pos_y"][1],
                 (len(env_ids), 1),
                 device=self.device
             ).squeeze(1)
+            return wrap_to_pi(sampled_yaw + self.arm_mount_yaw_offset)
 
         if reference_yaw is None:
             return torch_rand_float(-np.pi, np.pi, (len(env_ids), 1), device=self.device).squeeze(1)

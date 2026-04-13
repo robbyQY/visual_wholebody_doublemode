@@ -41,8 +41,33 @@ from isaacgym import gymapi
 from isaacgym import gymutil
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
+from .b1z1_mount import ensure_b1z1_mount_urdf, mount_deg_to_rad, normalize_mount_deg
 
 RUN_METADATA_FILENAME = "run_metadata.json"
+CHECKPOINT_FEATURE_NAMES = (
+    "observe_gait_commands",
+    "mixed_height_reference",
+    "omnidirectional_pos_y",
+    "ee_goal_obs_mode",
+    "gait_frequency_min",
+    "gait_frequency_max",
+    "gait_frequency_lin_vel_ref",
+    "gait_frequency_ang_vel_ref",
+    "gait_frequency_ang_vel_weight",
+    "mount_deg",
+)
+BOOL_CHECKPOINT_FEATURES = {
+    "observe_gait_commands",
+    "mixed_height_reference",
+    "omnidirectional_pos_y",
+}
+FLOAT_CHECKPOINT_FEATURES = {
+    "gait_frequency_min",
+    "gait_frequency_max",
+    "gait_frequency_lin_vel_ref",
+    "gait_frequency_ang_vel_ref",
+    "gait_frequency_ang_vel_weight",
+}
 
 def get_log_root():
     return os.environ.get("LEGGED_GYM_LOG_ROOT", os.path.join(LEGGED_GYM_ROOT_DIR, "logs"))
@@ -105,10 +130,26 @@ def _parse_schedule_arg(value):
         return [float(part) for part in parts]
     return [float(value)]
 
+def _normalize_checkpoint_feature_value(feature_name, value):
+    if value is None:
+        return None
+    if feature_name in BOOL_CHECKPOINT_FEATURES:
+        return bool(value)
+    if feature_name == "ee_goal_obs_mode":
+        return str(value)
+    if feature_name in FLOAT_CHECKPOINT_FEATURES:
+        return float(value)
+    if feature_name == "mount_deg":
+        return normalize_mount_deg(value)
+    raise KeyError(f"Unsupported checkpoint feature: {feature_name}")
+
+def _format_checkpoint_feature_summary(args):
+    return ", ".join(f"{feature_name}={getattr(args, feature_name, None)}" for feature_name in CHECKPOINT_FEATURE_NAMES)
+
 def _extract_checkpoint_features(args, env_cfg):
     if env_cfg is None:
         raise ValueError("env_cfg is required when extracting checkpoint features")
-    return {
+    checkpoint_features = {
         "observe_gait_commands": bool(env_cfg.env.observe_gait_commands),
         "mixed_height_reference": bool(env_cfg.goal_ee.sphere_center.mixed_height_reference),
         "omnidirectional_pos_y": bool(env_cfg.goal_ee.ranges.omnidirectional_pos_y),
@@ -119,6 +160,10 @@ def _extract_checkpoint_features(args, env_cfg):
         "gait_frequency_ang_vel_ref": float(env_cfg.env.gait_frequency_ang_vel_ref),
         "gait_frequency_ang_vel_weight": float(env_cfg.env.gait_frequency_ang_vel_weight),
     }
+    mount_yaw_offset = getattr(getattr(env_cfg.goal_ee, "urdf_mount", None), "mount_yaw_offset", None)
+    if mount_yaw_offset is not None:
+        checkpoint_features["mount_deg"] = normalize_mount_deg(np.degrees(float(mount_yaw_offset)))
+    return checkpoint_features
 
 def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
     os.makedirs(log_dir, exist_ok=True)
@@ -269,6 +314,7 @@ def load_run_metadata(log_dir, filename=None):
     gait_frequency_lin_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_LIN_VEL_REF")
     gait_frequency_ang_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_REF")
     gait_frequency_ang_vel_weight = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_WEIGHT")
+    mount_deg = _parse_float_from_train_log(train_log_path, "MOUNT_DEG")
     ee_goal_obs_mode = None
     if os.path.isfile(train_log_path):
         pattern = re.compile(r"EE_GOAL_OBS_MODE=([A-Za-z0-9_\-]+)")
@@ -295,6 +341,8 @@ def load_run_metadata(log_dir, filename=None):
         checkpoint_features["gait_frequency_ang_vel_ref"] = gait_frequency_ang_vel_ref
     if gait_frequency_ang_vel_weight is not None:
         checkpoint_features["gait_frequency_ang_vel_weight"] = gait_frequency_ang_vel_weight
+    if mount_deg is not None:
+        checkpoint_features["mount_deg"] = normalize_mount_deg(mount_deg)
     if checkpoint_features:
         return {
             "checkpoint_features": checkpoint_features,
@@ -302,48 +350,38 @@ def load_run_metadata(log_dir, filename=None):
         }
     return None
 
-def apply_checkpoint_features_from_run(args, log_dir, verbose=True):
-    metadata = load_run_metadata(log_dir)
+def apply_checkpoint_features_from_run(args, log_dir, verbose=True, filename=None):
+    metadata = load_run_metadata(log_dir, filename=filename)
     if metadata is None:
         if verbose:
             print(f"No run metadata found under: {log_dir}")
         return args, None
 
     checkpoint_features = metadata.get("checkpoint_features", {})
-    if "observe_gait_commands" in checkpoint_features:
-        args.observe_gait_commands = bool(checkpoint_features["observe_gait_commands"])
-    if "mixed_height_reference" in checkpoint_features:
-        args.mixed_height_reference = bool(checkpoint_features["mixed_height_reference"])
-    if "omnidirectional_pos_y" in checkpoint_features:
-        args.omnidirectional_pos_y = bool(checkpoint_features["omnidirectional_pos_y"])
-    if "ee_goal_obs_mode" in checkpoint_features:
-        args.ee_goal_obs_mode = str(checkpoint_features["ee_goal_obs_mode"])
-    if "gait_frequency_min" in checkpoint_features:
-        args.gait_frequency_min = float(checkpoint_features["gait_frequency_min"])
-    if "gait_frequency_max" in checkpoint_features:
-        args.gait_frequency_max = float(checkpoint_features["gait_frequency_max"])
-    if "gait_frequency_lin_vel_ref" in checkpoint_features:
-        args.gait_frequency_lin_vel_ref = float(checkpoint_features["gait_frequency_lin_vel_ref"])
-    if "gait_frequency_ang_vel_ref" in checkpoint_features:
-        args.gait_frequency_ang_vel_ref = float(checkpoint_features["gait_frequency_ang_vel_ref"])
-    if "gait_frequency_ang_vel_weight" in checkpoint_features:
-        args.gait_frequency_ang_vel_weight = float(checkpoint_features["gait_frequency_ang_vel_weight"])
+    explicit_custom_args = set(getattr(args, "explicit_custom_args", []))
+    source = metadata.get("_source", "<unknown>")
+
+    for feature_name in CHECKPOINT_FEATURE_NAMES:
+        if feature_name not in checkpoint_features:
+            if verbose and feature_name in explicit_custom_args:
+                print(
+                    f"Warning: checkpoint feature `{feature_name}` is missing from {source}; "
+                    "keeping the explicitly provided value."
+                )
+            continue
+
+        checkpoint_value = _normalize_checkpoint_feature_value(feature_name, checkpoint_features[feature_name])
+        current_value = getattr(args, feature_name, None)
+        current_value = _normalize_checkpoint_feature_value(feature_name, current_value)
+        if feature_name in explicit_custom_args and current_value is not None and current_value != checkpoint_value:
+            raise ValueError(
+                f"Checkpoint feature mismatch for `{feature_name}`: "
+                f"explicit={current_value}, checkpoint={checkpoint_value} (from {source})."
+            )
+        setattr(args, feature_name, checkpoint_value)
 
     if verbose:
-        print(
-            "Loaded checkpoint features from {}: observe_gait_commands={}, mixed_height_reference={}, omnidirectional_pos_y={}, ee_goal_obs_mode={}, gait_frequency_min={}, gait_frequency_max={}, gait_frequency_lin_vel_ref={}, gait_frequency_ang_vel_ref={}, gait_frequency_ang_vel_weight={}".format(
-                metadata.get("_source", "<unknown>"),
-                getattr(args, "observe_gait_commands", None),
-                getattr(args, "mixed_height_reference", None),
-                getattr(args, "omnidirectional_pos_y", None),
-                getattr(args, "ee_goal_obs_mode", None),
-                getattr(args, "gait_frequency_min", None),
-                getattr(args, "gait_frequency_max", None),
-                getattr(args, "gait_frequency_lin_vel_ref", None),
-                getattr(args, "gait_frequency_ang_vel_ref", None),
-                getattr(args, "gait_frequency_ang_vel_weight", None),
-            )
-        )
+        print(f"Loaded checkpoint features from {source}: {_format_checkpoint_feature_summary(args)}")
     return args, metadata
 
 def set_seed(seed, verbose=True):
@@ -451,6 +489,12 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.goal_ee.sphere_center.trunk_follow_ratio = args.trunk_follow_ratio
         if args.omnidirectional_pos_y:
             env_cfg.goal_ee.ranges.omnidirectional_pos_y = True
+        if args.mount_deg is not None:
+            mount_deg = normalize_mount_deg(args.mount_deg)
+            args.mount_deg = mount_deg
+            env_cfg.goal_ee.urdf_mount.mount_yaw_offset = mount_deg_to_rad(mount_deg)
+            mount_urdf_rel_path = ensure_b1z1_mount_urdf(LEGGED_GYM_ROOT_DIR, mount_deg)
+            env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
         lin_vel_x_min_schedule = _parse_schedule_arg(args.lin_vel_x_min_schedule)
         if lin_vel_x_min_schedule is not None:
             env_cfg.commands.lin_vel_x_min_schedule = lin_vel_x_min_schedule
@@ -490,6 +534,36 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
                 cfg_train.algorithm.priv_reg_coef_schedule = priv_reg_coef_schedule_alias
 
     return env_cfg, cfg_train
+
+def _collect_explicit_custom_args(argv, custom_parameters):
+    custom_flag_to_dest = {}
+    custom_flag_takes_value = {}
+    for parameter in custom_parameters:
+        flag = parameter.get("name")
+        if not flag or not flag.startswith("--"):
+            continue
+        dest = flag.lstrip("-").replace("-", "_")
+        custom_flag_to_dest[flag] = dest
+        custom_flag_takes_value[flag] = parameter.get("action") not in {"store_true", "store_false"}
+
+    explicit_custom_args = set()
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        matched_flag = None
+        for flag in custom_flag_to_dest.keys():
+            if token == flag or token.startswith(flag + "="):
+                matched_flag = flag
+                break
+        if matched_flag is None:
+            index += 1
+            continue
+        explicit_custom_args.add(custom_flag_to_dest[matched_flag])
+        if custom_flag_takes_value[matched_flag] and token == matched_flag:
+            index += 2
+        else:
+            index += 1
+    return sorted(explicit_custom_args)
 
 def get_args(test=False):
     filtered_argv = [sys.argv[0]]
@@ -549,6 +623,7 @@ def get_args(test=False):
         {"name": "--mixed_height_reference", "action": "store_true", "default": None, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
         {"name": "--omnidirectional_pos_y", "action": "store_true", "default": None, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
+        {"name": "--mount_deg", "type": int, "choices": [0, 90, 180, 270], "help": "B1Z1 arm mounting yaw in degrees. Selects the generated URDF and matching sampling offset."},
         {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},
@@ -559,12 +634,14 @@ def get_args(test=False):
         {"name": "--rows", "type": int, "help": "num_rows."},
         {"name": "--cols", "type": int, "help": "num_cols"},
     ]
+    explicit_custom_args = _collect_explicit_custom_args(filtered_argv[1:], custom_parameters)
     # parse arguments
     args = gymutil.parse_arguments(
         description="RL Policy",
         custom_parameters=custom_parameters)
     
     args.test = test
+    args.explicit_custom_args = explicit_custom_args
     args.headless = not getattr(args, "no_headless", False)
 
     # name allignment
