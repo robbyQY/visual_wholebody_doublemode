@@ -5,32 +5,50 @@ ROOT_DIR="/workspace/visual_wholebody"
 SCRIPT_DIR="${ROOT_DIR}/low-level/legged_gym/scripts"
 SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_ROOT="/data/logs"
+RDZV_PORT="${RDZV_PORT:-}"
 
 PROJ_NAME="b1z1-low"
-EXPTID="train_default"
 TASK="b1z1"
+EXPTID="train"
+
+# Training control
+TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
+LOAD_EXPTID=""          # only used when TRAIN_MODE=load
+LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
 MAX_ITERATIONS=""
 NUM_ENVS=""
-MIXED_HEIGHT_REFERENCE=false
-TRUNK_FOLLOW_RATIO=""
-OMNIDIRECTIONAL_POS_Y=false
+TRAIN_LOG_EVERY="100"
+
+# Task / observation options
 EE_GOAL_OBS_MODE="command"  # command | arm_base_target
+OBSERVE_GAIT_COMMANDS=true
+MIXED_HEIGHT_REFERENCE=false
+TRUNK_FOLLOW_RATIO="0.5"
+OMNIDIRECTIONAL_POS_Y=false
+ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
+
+# Curriculum schedules
 LIN_VEL_X_MIN_SCHEDULE=()
 LIN_VEL_X_MAX_SCHEDULE=()
 ANG_VEL_YAW_SCHEDULE=()
 MIXING_SCHEDULE=()
 PRIV_REG_COEF_SCHEDULE=()
-TRAIN_MODE="fresh"      # Training mode: fresh | resume | load
-LOAD_EXPTID=""          # only used when TRAIN_MODE=load
-LOAD_CKPT="-1"          # only used when TRAIN_MODE=load
-TRAIN_LOG_EVERY="100"
-NOHUP_BACKGROUND=true
-RDZV_PORT="${RDZV_PORT:-}"
 
+# Runtime toggles
+NOHUP_BACKGROUND=true
 DISABLE_WANDB=false
-OBSERVE_GAIT_COMMANDS=true
-# Set to true to enable command-dependent gait frequency with min/max = 1.2/2.8.
-ENABLE_DYNAMIC_GAIT_FREQUENCY=false
+
+EXPTID_SUFFIX=""
+if [[ "${OMNIDIRECTIONAL_POS_Y}" == true ]]; then
+  EXPTID_SUFFIX+="_omnidirec"
+fi
+if [[ "${ENABLE_DYNAMIC_GAIT_FREQUENCY}" == true ]]; then
+  EXPTID_SUFFIX+="_adaptivegait"
+fi
+if [[ "${MIXED_HEIGHT_REFERENCE}" == true ]]; then
+  EXPTID_SUFFIX+="_doublemode"
+fi
+EXPTID+="${EXPTID_SUFFIX}"
 
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 

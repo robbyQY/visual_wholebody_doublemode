@@ -99,11 +99,7 @@ class ManipLoco(LeggedRobot):
                 actions = self.action_history_buf[:, -2]
 
         self.actions = actions.clone()
-
-        dpos = self.curr_ee_goal_cart_world - self.ee_pos
-        drot = orientation_error(self.ee_goal_orn_quat, self.ee_orn / torch.norm(self.ee_orn, dim=-1).unsqueeze(-1))
-        dpose = torch.cat([dpos, drot], -1).unsqueeze(-1)
-        arm_pos_targets = self._control_ik(dpose) + self.dof_pos[:, -(6 + self.cfg.env.num_gripper_joints):-self.cfg.env.num_gripper_joints]
+        arm_pos_targets = self._get_arm_pos_targets()
         all_pos_targets = torch.zeros_like(self.dof_pos)
         all_pos_targets[:, -(6 + self.cfg.env.num_gripper_joints):-self.cfg.env.num_gripper_joints] = arm_pos_targets
         all_pos_targets[:, -self.cfg.env.num_gripper_joints:] = self.gripper_pos_targets
@@ -127,6 +123,15 @@ class ManipLoco(LeggedRobot):
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
         self.global_steps += 1
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.arm_rew_buf, self.reset_buf, self.extras
+
+    def _get_arm_pos_targets(self):
+        if self.cfg.env.teleop_mode and self.teleop_arm_control_mode == "joint":
+            return self.teleop_arm_joint_pos_targets
+
+        dpos = self.curr_ee_goal_cart_world - self.ee_pos
+        drot = orientation_error(self.ee_goal_orn_quat, self.ee_orn / torch.norm(self.ee_orn, dim=-1).unsqueeze(-1))
+        dpose = torch.cat([dpos, drot], -1).unsqueeze(-1)
+        return self._control_ik(dpose) + self.dof_pos[:, self.arm_dof_start_idx:self.arm_dof_end_idx]
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -947,6 +952,10 @@ class ManipLoco(LeggedRobot):
         self.gripper_pos_targets[:] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
         self.arm_dof_start_idx = self.num_dofs - (6 + self.cfg.env.num_gripper_joints)
         self.arm_dof_end_idx = self.num_dofs - self.cfg.env.num_gripper_joints
+        self.teleop_arm_control_mode = "ee"
+        self.teleop_arm_joint_step = 0.05
+        self.teleop_arm_joint_pos_targets = self.dof_pos[:, self.arm_dof_start_idx:self.arm_dof_end_idx].clone()
+        self.teleop_hold_actual_ee_target = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.arm_waist_idx = self.dof_names.index("z1_waist")
         self.omnidirectional_init_pos_y_limits = torch.tensor(
             self.cfg.goal_ee.ranges.omnidirectional_init_pos_y,
@@ -1012,6 +1021,8 @@ class ManipLoco(LeggedRobot):
             self.dof_pos[env_ids, self.arm_waist_idx] = self.reset_init_ee_sphere[env_ids, 2]
         self.dof_vel[env_ids] = 0.
         self.gripper_pos_targets[env_ids] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
+        self.teleop_arm_joint_pos_targets[env_ids] = self.dof_pos[env_ids, self.arm_dof_start_idx:self.arm_dof_end_idx]
+        self.teleop_hold_actual_ee_target[env_ids] = False
 
         self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
         self.gym.refresh_rigid_body_state_tensor(self.sim)
@@ -1081,27 +1092,35 @@ class ManipLoco(LeggedRobot):
             ).unsqueeze(1)
             self.commands[:] *= active_mask
 
-            self.curr_ee_goal_cart[:] = self.teleop_raw_ee_goal_cart
-            self.curr_ee_goal_cart[:, 0] = torch.clip(
-                self.curr_ee_goal_cart[:, 0],
+        if self.teleop_arm_control_mode == "joint":
+            self._sync_teleop_ee_goal_to_current_pose()
+            return
+
+        hold_mask = self.teleop_hold_actual_ee_target.unsqueeze(1)
+        if self.cfg.env.teleop_input_regularization:
+            clipped_ee_goal_cart = self.teleop_raw_ee_goal_cart.clone()
+            clipped_ee_goal_cart[:, 0] = torch.clip(
+                clipped_ee_goal_cart[:, 0],
                 self.cfg.env.teleop_ee_goal_x_limit[0],
                 self.cfg.env.teleop_ee_goal_x_limit[1],
             )
-            self.curr_ee_goal_cart[:, 1] = torch.clip(
-                self.curr_ee_goal_cart[:, 1],
+            clipped_ee_goal_cart[:, 1] = torch.clip(
+                clipped_ee_goal_cart[:, 1],
                 self.cfg.env.teleop_ee_goal_y_limit[0],
                 self.cfg.env.teleop_ee_goal_y_limit[1],
             )
-            self.curr_ee_goal_cart[:, 2] = torch.clip(
-                self.curr_ee_goal_cart[:, 2],
+            clipped_ee_goal_cart[:, 2] = torch.clip(
+                clipped_ee_goal_cart[:, 2],
                 self.cfg.env.teleop_ee_goal_z_limit[0],
                 self.cfg.env.teleop_ee_goal_z_limit[1],
             )
-            self.ee_goal_orn_delta_rpy[:] = torch.clip(
+            clipped_ee_goal_delta_rpy = torch.clip(
                 self.teleop_raw_ee_goal_orn_delta_rpy,
                 min=torch.tensor(self.cfg.goal_ee.ranges.delta_orn_r[0:1] + self.cfg.goal_ee.ranges.delta_orn_p[0:1] + self.cfg.goal_ee.ranges.delta_orn_y[0:1], device=self.device),
                 max=torch.tensor(self.cfg.goal_ee.ranges.delta_orn_r[1:2] + self.cfg.goal_ee.ranges.delta_orn_p[1:2] + self.cfg.goal_ee.ranges.delta_orn_y[1:2], device=self.device),
             )
+            self.curr_ee_goal_cart[:] = torch.where(hold_mask, self.teleop_raw_ee_goal_cart, clipped_ee_goal_cart)
+            self.ee_goal_orn_delta_rpy[:] = torch.where(hold_mask, self.teleop_raw_ee_goal_orn_delta_rpy, clipped_ee_goal_delta_rpy)
         else:
             self.curr_ee_goal_cart[:] = self.teleop_raw_ee_goal_cart
             self.ee_goal_orn_delta_rpy[:] = self.teleop_raw_ee_goal_orn_delta_rpy
@@ -1606,7 +1625,66 @@ class ManipLoco(LeggedRobot):
         self.curr_ee_goal_sphere[:] = self.reset_init_ee_sphere[:]
         self.teleop_raw_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
         self.teleop_raw_ee_goal_orn_delta_rpy[:] = 0
+        self.teleop_hold_actual_ee_target[:] = False
         self._update_effective_teleop_inputs()
+
+    def _sync_teleop_arm_joint_targets_to_current_pose(self, env_ids=None):
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        if len(env_ids) == 0:
+            return
+        arm_limits = self.dof_pos_limits[self.arm_dof_start_idx:self.arm_dof_end_idx]
+        current_arm_pos = self.dof_pos[env_ids, self.arm_dof_start_idx:self.arm_dof_end_idx]
+        self.teleop_arm_joint_pos_targets[env_ids] = torch.clip(
+            current_arm_pos,
+            arm_limits[:, 0],
+            arm_limits[:, 1],
+        )
+
+    def _sync_teleop_ee_goal_to_current_pose(self, env_ids=None):
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        if len(env_ids) == 0:
+            return
+
+        goal_ref_origin = self.get_goal_reference_origin()[env_ids]
+        goal_ref_quat = self.get_goal_reference_quat()[env_ids]
+        goal_center_offset = self.get_goal_center_offset_local()[env_ids]
+        ee_orn_normalized = self.ee_orn[env_ids] / torch.norm(self.ee_orn[env_ids], dim=-1, keepdim=True)
+
+        ee_goal_local_with_center = quat_rotate_inverse(goal_ref_quat, self.ee_pos[env_ids] - goal_ref_origin)
+        self.teleop_raw_ee_goal_cart[env_ids] = ee_goal_local_with_center - goal_center_offset
+        self.curr_ee_goal_cart[env_ids] = self.teleop_raw_ee_goal_cart[env_ids]
+        self.curr_ee_goal_sphere[env_ids] = cart2sphere(self.curr_ee_goal_cart[env_ids])
+
+        local_ee_orn = quat_mul(quat_conjugate(goal_ref_quat), ee_orn_normalized)
+        local_ee_orn_rpy = torch.stack(euler_from_quat(local_ee_orn), dim=-1)
+        default_pitch = -self.curr_ee_goal_sphere[env_ids, 1] + self.cfg.goal_ee.arm_induced_pitch
+        self.teleop_raw_ee_goal_orn_delta_rpy[env_ids, 0] = wrap_to_pi(local_ee_orn_rpy[:, 0] - np.pi / 2)
+        self.teleop_raw_ee_goal_orn_delta_rpy[env_ids, 1] = wrap_to_pi(local_ee_orn_rpy[:, 1] - default_pitch)
+        self.teleop_raw_ee_goal_orn_delta_rpy[env_ids, 2] = wrap_to_pi(local_ee_orn_rpy[:, 2] - self.curr_ee_goal_sphere[env_ids, 2])
+        self.ee_goal_orn_delta_rpy[env_ids] = self.teleop_raw_ee_goal_orn_delta_rpy[env_ids]
+        self.teleop_hold_actual_ee_target[env_ids] = True
+
+        self.curr_ee_goal_cart_world[env_ids] = self.ee_pos[env_ids]
+        self.ee_goal_orn_quat[env_ids] = ee_orn_normalized
+        self.ee_goal_orn_euler[env_ids] = torch.stack(euler_from_quat(self.ee_goal_orn_quat[env_ids]), dim=-1)
+
+    def _set_teleop_arm_control_mode(self, mode):
+        if mode == self.teleop_arm_control_mode:
+            return
+        if mode == "joint":
+            self._sync_teleop_arm_joint_targets_to_current_pose()
+        elif mode == "ee":
+            self._sync_teleop_ee_goal_to_current_pose()
+        else:
+            raise ValueError(f"Unsupported teleop arm control mode: {mode}")
+        self.teleop_arm_control_mode = mode
+        print(f"[teleop] arm control mode: {mode}")
+
+    def _toggle_teleop_arm_control_mode(self):
+        next_mode = "joint" if self.teleop_arm_control_mode == "ee" else "ee"
+        self._set_teleop_arm_control_mode(next_mode)
 
     def _update_curr_ee_goal(self):
         """Updates the end-effector target.
@@ -1708,6 +1786,7 @@ class ManipLoco(LeggedRobot):
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "open_gripper")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "close_gripper")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_L, "reset_eef_goal_pose")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_G, "toggle_arm_control_mode")
             if self.cfg.goal_ee.sphere_center.mixed_height_reference:
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "set_height_reference_invariant")
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_T, "set_height_reference_follow")
@@ -1731,59 +1810,104 @@ class ManipLoco(LeggedRobot):
         elif evt.action == "turn_right":
             self.teleop_raw_commands[:, 2] -= 0.05
 
+        if evt.action == "toggle_arm_control_mode":
+            self._toggle_teleop_arm_control_mode()
+
         self._update_effective_teleop_inputs()
 
-        # Sphere position
-        # if evt.action == "increase_eef_goal_l":
-        #     self.curr_ee_goal_sphere[:, 0] += 0.05
-        # elif evt.action == "decrease_eef_goal_l":
-        #     self.curr_ee_goal_sphere[:, 0] -= 0.05
+        if self.teleop_arm_control_mode == "joint":
+            joint_delta = self.teleop_arm_joint_step
+            if evt.action == "increase_eef_goal_l":
+                self.teleop_arm_joint_pos_targets[:, 0] += joint_delta
+            elif evt.action == "decrease_eef_goal_l":
+                self.teleop_arm_joint_pos_targets[:, 0] -= joint_delta
 
-        # if evt.action == "increase_eef_goal_p":
-        #     self.curr_ee_goal_sphere[:, 1] += 0.05
-        # elif evt.action == "decrease_eef_goal_p":
-        #     self.curr_ee_goal_sphere[:, 1] -= 0.05
+            if evt.action == "increase_eef_goal_p":
+                self.teleop_arm_joint_pos_targets[:, 1] += joint_delta
+            elif evt.action == "decrease_eef_goal_p":
+                self.teleop_arm_joint_pos_targets[:, 1] -= joint_delta
 
-        # if evt.action == "increase_eef_goal_y":
-        #     self.curr_ee_goal_sphere[:, 2] += 0.05
-        # elif evt.action == "decrease_eef_goal_y":
-        #     self.curr_ee_goal_sphere[:, 2] -= 0.05
+            if evt.action == "increase_eef_goal_y":
+                self.teleop_arm_joint_pos_targets[:, 2] += joint_delta
+            elif evt.action == "decrease_eef_goal_y":
+                self.teleop_arm_joint_pos_targets[:, 2] -= joint_delta
 
-        # cartesian position
-        if evt.action == "increase_eef_goal_l":
-            self.teleop_raw_ee_goal_cart[:, 0] += 0.05
-        elif evt.action == "decrease_eef_goal_l":
-            self.teleop_raw_ee_goal_cart[:, 0] -= 0.05
+            if evt.action == "increase_eef_goal_dr":
+                self.teleop_arm_joint_pos_targets[:, 3] += joint_delta
+            elif evt.action == "decrease_eef_goal_dr":
+                self.teleop_arm_joint_pos_targets[:, 3] -= joint_delta
 
-        if evt.action == "increase_eef_goal_p":
-            self.teleop_raw_ee_goal_cart[:, 1] += 0.05
-        elif evt.action == "decrease_eef_goal_p":
-            self.teleop_raw_ee_goal_cart[:, 1] -= 0.05
+            if evt.action == "increse_eef_goal_dp":
+                self.teleop_arm_joint_pos_targets[:, 4] += joint_delta
+            elif evt.action == "decrease_eef_goal_dp":
+                self.teleop_arm_joint_pos_targets[:, 4] -= joint_delta
 
-        if evt.action == "increase_eef_goal_y":
-            self.teleop_raw_ee_goal_cart[:, 2] += 0.05
-        elif evt.action == "decrease_eef_goal_y":
-            self.teleop_raw_ee_goal_cart[:, 2] -= 0.05
-        
-        # orientation
-        if evt.action == "increase_eef_goal_dr":
-            self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] += 0.05
-        elif evt.action == "decrease_eef_goal_dr":
-            self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] -= 0.05
+            if evt.action == "increase_eef_goal_dy":
+                self.teleop_arm_joint_pos_targets[:, 5] += joint_delta
+            elif evt.action == "decrease_eef_goal_dy":
+                self.teleop_arm_joint_pos_targets[:, 5] -= joint_delta
 
-        if evt.action == "increse_eef_goal_dp":
-            self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] += 0.05
-        elif evt.action == "decrease_eef_goal_dp":
-            self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] -= 0.05
-        
-        if evt.action == "increase_eef_goal_dy":
-            self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] += 0.05
-        elif evt.action == "decrease_eef_goal_dy":
-            self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] -= 0.05
+            if evt.action == "reset_eef_goal_pose":
+                self.teleop_arm_joint_pos_targets[:] = self.default_dof_pos[self.arm_dof_start_idx:self.arm_dof_end_idx]
+                print("[teleop] reset arm joint targets to default")
+
+            arm_limits = self.dof_pos_limits[self.arm_dof_start_idx:self.arm_dof_end_idx]
+            self.teleop_arm_joint_pos_targets[:] = torch.clip(
+                self.teleop_arm_joint_pos_targets,
+                arm_limits[:, 0],
+                arm_limits[:, 1],
+            )
+        else:
+            if evt.action in {
+                "increase_eef_goal_l",
+                "decrease_eef_goal_l",
+                "increase_eef_goal_p",
+                "decrease_eef_goal_p",
+                "increase_eef_goal_y",
+                "decrease_eef_goal_y",
+                "increase_eef_goal_dr",
+                "decrease_eef_goal_dr",
+                "increse_eef_goal_dp",
+                "decrease_eef_goal_dp",
+                "increase_eef_goal_dy",
+                "decrease_eef_goal_dy",
+            }:
+                self.teleop_hold_actual_ee_target[:] = False
+
+            if evt.action == "increase_eef_goal_l":
+                self.teleop_raw_ee_goal_cart[:, 0] += 0.05
+            elif evt.action == "decrease_eef_goal_l":
+                self.teleop_raw_ee_goal_cart[:, 0] -= 0.05
+
+            if evt.action == "increase_eef_goal_p":
+                self.teleop_raw_ee_goal_cart[:, 1] += 0.05
+            elif evt.action == "decrease_eef_goal_p":
+                self.teleop_raw_ee_goal_cart[:, 1] -= 0.05
+
+            if evt.action == "increase_eef_goal_y":
+                self.teleop_raw_ee_goal_cart[:, 2] += 0.05
+            elif evt.action == "decrease_eef_goal_y":
+                self.teleop_raw_ee_goal_cart[:, 2] -= 0.05
+            
+            if evt.action == "increase_eef_goal_dr":
+                self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] += 0.05
+            elif evt.action == "decrease_eef_goal_dr":
+                self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] -= 0.05
+
+            if evt.action == "increse_eef_goal_dp":
+                self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] += 0.05
+            elif evt.action == "decrease_eef_goal_dp":
+                self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] -= 0.05
+            
+            if evt.action == "increase_eef_goal_dy":
+                self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] += 0.05
+            elif evt.action == "decrease_eef_goal_dy":
+                self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] -= 0.05
 
         if evt.action == "reset_eef_goal_pose":
-            self._reset_teleop_ee_goal_to_default()
-            print("[teleop] reset end-effector goal pose to default")
+            if self.teleop_arm_control_mode == "ee":
+                self._reset_teleop_ee_goal_to_default()
+                print("[teleop] reset end-effector goal pose to default")
 
         if evt.action == "open_gripper":
             self.gripper_pos_targets += 0.05
