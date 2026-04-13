@@ -79,7 +79,7 @@ class OnPolicyRunner:
         self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
-        self.train_log_every = max(1, int(self.cfg.get("train_log_every", 1)))
+        self.train_log_every = max(1, int(self.cfg["train_log_every"]))
         if self.is_main_process:
             summary(self.alg.actor_critic)
 
@@ -114,6 +114,13 @@ class OnPolicyRunner:
         self.env.command_ranges["ang_vel_yaw"] = [ang_vel_yaw_min, ang_vel_yaw_max]
         self.curriculum_state["Schedule/ang_vel_yaw_command_min"] = ang_vel_yaw_min
         self.curriculum_state["Schedule/ang_vel_yaw_command_max"] = ang_vel_yaw_max
+
+        if not self.env.omnidirectional_pos_y:
+            non_omni_pos_y_max = abs(resolve_schedule_value(self.env.cfg.commands.non_omni_pos_y_schedule, iteration, default_end_iter=total_iterations))
+            non_omni_pos_y_min = -non_omni_pos_y_max
+            self.curriculum_state["Schedule/non_omni_goal_yaw_min"] = non_omni_pos_y_min
+            self.curriculum_state["Schedule/non_omni_goal_yaw_max"] = non_omni_pos_y_max
+            self.env.goal_ee_ranges["pos_y"] = [non_omni_pos_y_min, non_omni_pos_y_max]
     
     def set_it(self, it):
         self.current_learning_iteration = it

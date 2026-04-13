@@ -99,6 +99,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         lin_vel_x_min_schedule = [0.0, -0.8, 5000, 5000]
         lin_vel_x_max_schedule = [0.8, 0.8, 0, 0]
         ang_vel_yaw_schedule = [1.0, 1.0, 0, 0]
+        non_omni_pos_y_schedule = [1.2, 1.2, 0, 0]
 
         ang_vel_yaw_clip = 0.5
         lin_vel_x_clip = 0.2

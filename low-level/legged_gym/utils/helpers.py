@@ -160,8 +160,8 @@ def _extract_checkpoint_features(args, env_cfg):
         "gait_frequency_ang_vel_ref": float(env_cfg.env.gait_frequency_ang_vel_ref),
         "gait_frequency_ang_vel_weight": float(env_cfg.env.gait_frequency_ang_vel_weight),
     }
-    mount_yaw_offset = getattr(getattr(env_cfg.goal_ee, "urdf_mount", None), "mount_yaw_offset", None)
-    if mount_yaw_offset is not None:
+    if hasattr(env_cfg, "goal_ee") and hasattr(env_cfg.goal_ee, "urdf_mount"):
+        mount_yaw_offset = env_cfg.goal_ee.urdf_mount.mount_yaw_offset
         checkpoint_features["mount_deg"] = normalize_mount_deg(np.degrees(float(mount_yaw_offset)))
     return checkpoint_features
 
@@ -504,6 +504,9 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         ang_vel_yaw_schedule = _parse_schedule_arg(args.ang_vel_yaw_schedule)
         if ang_vel_yaw_schedule is not None:
             env_cfg.commands.ang_vel_yaw_schedule = ang_vel_yaw_schedule
+        non_omni_pos_y_schedule = _parse_schedule_arg(args.non_omni_pos_y_schedule)
+        if non_omni_pos_y_schedule is not None:
+            env_cfg.commands.non_omni_pos_y_schedule = non_omni_pos_y_schedule
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -627,6 +630,7 @@ def get_args(test=False):
         {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},
+        {"name": "--non_omni_pos_y_schedule", "type": str, "help": "Curriculum for the symmetric non-omnidirectional EE goal yaw range magnitude as comma-separated values: start,end or start,end,start_iter,end_iter. Applied as [-value, value]."},
         {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,end_iter or start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedual", "type": str, "help": "Deprecated alias for --priv_reg_coef_schedule."},

@@ -85,9 +85,7 @@ class ManipLoco(LeggedRobot):
         if self.action_delay != -1:
             self.action_history_buf = torch.cat([self.action_history_buf[:, 1:], actions[:, None, :]], dim=1)
             # actions = self.action_history_buf[:, -self.action_delay - 1] # delay for 1/50=20ms
-        action_delay_mode = "auto"
-        if self.cfg.env.teleop_mode:
-            action_delay_mode = getattr(self.cfg.env, "action_delay_mode", "auto")
+        action_delay_mode = self.cfg.env.action_delay_mode
         if action_delay_mode == "undelayed":
             actions = self.action_history_buf[:, -1]
         elif action_delay_mode == "delayed":
@@ -389,6 +387,9 @@ class ManipLoco(LeggedRobot):
             "ang_vel_yaw": [-ang_vel_yaw_max, ang_vel_yaw_max],
         }
         self.goal_ee_ranges = class_to_dict(self.cfg.goal_ee.ranges)
+        if not self.cfg.goal_ee.ranges.omnidirectional_pos_y:
+            non_omni_pos_y_max = abs(resolve_schedule_value(self.cfg.commands.non_omni_pos_y_schedule, counter=0.0))
+            self.goal_ee_ranges["pos_y"] = [-non_omni_pos_y_max, non_omni_pos_y_max]
 
         if self.cfg.terrain.mesh_type not in ['heightfield', 'trimesh']:
             self.cfg.terrain.curriculum = False
@@ -791,7 +792,7 @@ class ManipLoco(LeggedRobot):
         base_yaw = euler_from_quat(self.base_quat)[2]
         self.base_yaw_euler = torch.cat([torch.zeros(self.num_envs, 2, device=self.device), base_yaw.view(-1, 1)], dim=1)
         self.base_yaw_quat = quat_from_euler_xyz(torch.tensor(0), torch.tensor(0), base_yaw)
-        self.arm_mount_yaw_offset = float(getattr(urdf_mount_cfg, "mount_yaw_offset", 0.0))
+        self.arm_mount_yaw_offset = float(urdf_mount_cfg.mount_yaw_offset)
 
         self.obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, self.cfg.env.num_proprio, device=self.device, dtype=torch.float)
         self.action_history_buf = torch.zeros(self.num_envs, self.action_delay + 2, self.num_actions, device=self.device, dtype=torch.float)
@@ -1355,7 +1356,7 @@ class ManipLoco(LeggedRobot):
         """
         if not self.cfg.goal_ee.sphere_center.mixed_height_reference:
             return self.ee_goal_center_offset
-        trunk_follow_anchor = getattr(self.cfg.goal_ee.sphere_center, "trunk_follow_anchor", "z1_shoulder")
+        trunk_follow_anchor = self.cfg.goal_ee.sphere_center.trunk_follow_anchor
         if trunk_follow_anchor == "arm_base":
             trunk_follow_center_offset = self.arm_base_offset
         elif trunk_follow_anchor == "z1_waist":
@@ -1459,18 +1460,22 @@ class ManipLoco(LeggedRobot):
         sphere_geom = gymutil.WireframeSphereGeometry(0.005, 8, 8, None, color=(1, 0, 0))
         sphere_geom_yellow = gymutil.WireframeSphereGeometry(0.01, 16, 16, None, color=(1, 1, 0))
 
-        t = torch.linspace(0, 1, 10, device=self.device)[None, None, None, :]
-        ee_target_all_sphere = torch.lerp(self.ee_start_sphere[..., None], self.ee_goal_sphere[..., None], t).squeeze(0)
+        t = torch.linspace(0, 1, 10, device=self.device)[:, None, None]
+        ee_target_all_sphere = self._interpolate_goal_sphere(
+            self.ee_start_sphere[None, ...],
+            self.ee_goal_sphere[None, ...],
+            t,
+        )
         ee_target_all_cart_world = torch.zeros_like(ee_target_all_sphere)
         goal_ref_quat = self.get_goal_reference_quat()
         goal_ref_center = self.get_ee_goal_spherical_center()
         for i in range(10):
-            ee_target_cart = sphere2cart(ee_target_all_sphere[..., i])
-            ee_target_all_cart_world[..., i] = quat_apply(goal_ref_quat, ee_target_cart)
-        ee_target_all_cart_world += goal_ref_center[:, :, None]
+            ee_target_cart = sphere2cart(ee_target_all_sphere[i])
+            ee_target_all_cart_world[i] = quat_apply(goal_ref_quat, ee_target_cart)
+        ee_target_all_cart_world += goal_ref_center[None, :, :]
         for i in range(self.num_envs):
             for j in range(10):
-                pose = gymapi.Transform(gymapi.Vec3(ee_target_all_cart_world[i, 0, j], ee_target_all_cart_world[i, 1, j], ee_target_all_cart_world[i, 2, j]), r=None)
+                pose = gymapi.Transform(gymapi.Vec3(ee_target_all_cart_world[j, i, 0], ee_target_all_cart_world[j, i, 1], ee_target_all_cart_world[j, i, 2]), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], pose)
 
     def _control_ik(self, dpose):
@@ -1538,6 +1543,19 @@ class ManipLoco(LeggedRobot):
         transition = (abs_yaw - self.omnidirectional_rear_transition_pos_y_abs) / denom
         transition = torch.clamp(transition, 0.0, 1.0)
         return transition * transition * (3.0 - 2.0 * transition)
+
+    def _interpolate_goal_sphere(self, start_sphere, goal_sphere, t):
+        interp_sphere = torch.lerp(start_sphere, goal_sphere, t)
+        if self.omnidirectional_pos_y:
+            return interp_sphere
+
+        yaw_t = t[..., 0] if t.ndim > 0 and t.shape[-1] == 1 else t
+        start_yaw_arm_front = wrap_to_pi(start_sphere[..., 2] - self.arm_mount_yaw_offset)
+        goal_yaw_arm_front = wrap_to_pi(goal_sphere[..., 2] - self.arm_mount_yaw_offset)
+        interp_sphere[..., 2] = wrap_to_pi(
+            torch.lerp(start_yaw_arm_front, goal_yaw_arm_front, yaw_t) + self.arm_mount_yaw_offset
+        )
+        return interp_sphere
 
     def _sample_ee_goal_yaw(self, env_ids, reference_yaw=None):
         if not self.omnidirectional_pos_y:
@@ -1620,8 +1638,12 @@ class ManipLoco(LeggedRobot):
         The interpolated path is sampled in the goal local frame, then compared against
         `collision_lower_limits/upper_limits` and `underground_limit`.
         """
-        ee_target_all_sphere = torch.lerp(self.ee_start_sphere[env_ids, ..., None], self.ee_goal_sphere[env_ids, ...,  None], self.collision_check_t).squeeze(-1)
-        ee_target_cart = sphere2cart(torch.permute(ee_target_all_sphere, (2, 0, 1)).reshape(-1, 3)).reshape(self.num_collision_check_samples, -1, 3)
+        ee_target_all_sphere = self._interpolate_goal_sphere(
+            self.ee_start_sphere[env_ids][None, ...],
+            self.ee_goal_sphere[env_ids][None, ...],
+            self.collision_check_t.squeeze(0).squeeze(0)[:, None, None],
+        )
+        ee_target_cart = sphere2cart(ee_target_all_sphere.reshape(-1, 3)).reshape(self.num_collision_check_samples, -1, 3)
         collision_mask = torch.any(torch.logical_and(torch.all(ee_target_cart < self.collision_upper_limits, dim=-1), torch.all(ee_target_cart > self.collision_lower_limits, dim=-1)), dim=0)
         underground_mask = torch.any(ee_target_cart[..., 2] < self.underground_limit, dim=0)
         return collision_mask | underground_mask
@@ -1700,7 +1722,7 @@ class ManipLoco(LeggedRobot):
         """
         if not self.cfg.env.teleop_mode:
             t = torch.clip(self.goal_timer / self.traj_timesteps, 0, 1)
-            self.curr_ee_goal_sphere[:] = torch.lerp(self.ee_start_sphere, self.ee_goal_sphere, t[:, None])
+            self.curr_ee_goal_sphere[:] = self._interpolate_goal_sphere(self.ee_start_sphere, self.ee_goal_sphere, t[:, None])
         else:
             self._update_effective_teleop_inputs()
 

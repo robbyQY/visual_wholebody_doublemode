@@ -11,7 +11,9 @@ class ManipLoco_rewards:
 
     def _reward_tracking_ee_sphere(self):
         ee_pos_local = quat_rotate_inverse(self.env.get_goal_reference_quat(), self.env.ee_pos - self.env.get_ee_goal_spherical_center())
-        ee_pos_error = torch.sum(torch.abs(cart2sphere(ee_pos_local) - self.env.curr_ee_goal_sphere) * self.env.sphere_error_scale, dim=1)
+        ee_pos_error = cart2sphere(ee_pos_local) - self.env.curr_ee_goal_sphere
+        ee_pos_error[:, 2] = torch_wrap_to_pi_minuspi(ee_pos_error[:, 2])
+        ee_pos_error = torch.sum(torch.abs(ee_pos_error) * self.env.sphere_error_scale, dim=1)
         return torch.exp(-ee_pos_error/self.env.cfg.rewards.tracking_ee_sigma), ee_pos_error
 
     def _reward_tracking_ee_world(self):

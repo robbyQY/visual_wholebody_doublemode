@@ -32,6 +32,7 @@ ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
 LIN_VEL_X_MIN_SCHEDULE=()
 LIN_VEL_X_MAX_SCHEDULE=()
 ANG_VEL_YAW_SCHEDULE=()
+NON_OMNI_GOAL_YAW_SCHEDULE=()
 MIXING_SCHEDULE=()
 PRIV_REG_COEF_SCHEDULE=()
 
@@ -169,6 +170,9 @@ if (( ${#LIN_VEL_X_MAX_SCHEDULE[@]} > 0 )); then
 fi
 if (( ${#ANG_VEL_YAW_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--ang_vel_yaw_schedule "$(IFS=,; echo "${ANG_VEL_YAW_SCHEDULE[*]}")")
+fi
+if (( ${#NON_OMNI_GOAL_YAW_SCHEDULE[@]} > 0 )); then
+  CURRICULUM_ARGS+=(--non_omni_pos_y_schedule "$(IFS=,; echo "${NON_OMNI_GOAL_YAW_SCHEDULE[*]}")")
 fi
 if (( ${#MIXING_SCHEDULE[@]} > 0 )); then
   CURRICULUM_ARGS+=(--mixing_schedule "$(IFS=,; echo "${MIXING_SCHEDULE[*]}")")

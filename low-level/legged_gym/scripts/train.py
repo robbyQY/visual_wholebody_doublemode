@@ -236,7 +236,10 @@ def log_training_header(args, log_pth, num_gpus, env_cfg=None):
     print(f"MIXED_HEIGHT_REFERENCE={env_cfg.goal_ee.sphere_center.mixed_height_reference}")
     print(f"TRUNK_FOLLOW_RATIO={env_cfg.goal_ee.sphere_center.trunk_follow_ratio}")
     print(f"OMNIDIRECTIONAL_POS_Y={env_cfg.goal_ee.ranges.omnidirectional_pos_y}")
-    print(f"MOUNT_DEG={_extract_checkpoint_features(args, env_cfg).get('mount_deg', 0)}")
+    checkpoint_features = _extract_checkpoint_features(args, env_cfg)
+    print(f"MOUNT_DEG={checkpoint_features['mount_deg'] if 'mount_deg' in checkpoint_features else None}")
+    if not env_cfg.goal_ee.ranges.omnidirectional_pos_y:
+        print(f"NON_OMNI_POS_Y_SCHEDULE={env_cfg.commands.non_omni_pos_y_schedule}")
     print(f"EE_GOAL_OBS_MODE={env_cfg.env.ee_goal_obs_mode}")
     print(f"GAIT_FREQUENCY_MIN={env_cfg.env.gait_frequency_min}")
     print(f"GAIT_FREQUENCY_MAX={env_cfg.env.gait_frequency_max}")
