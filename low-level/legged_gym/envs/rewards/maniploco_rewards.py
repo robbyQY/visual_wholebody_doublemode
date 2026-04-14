@@ -7,6 +7,7 @@ class ManipLoco_rewards:
 
     def load_env(self, env):
         self.env = env
+
     # -------------Z1: Reward functions----------------
 
     def _reward_tracking_ee_sphere(self):
@@ -22,14 +23,14 @@ class ManipLoco_rewards:
         return rew, ee_pos_error
 
     def _reward_tracking_ee_sphere_walking(self):
-        reward, metric = self.env._reward_tracking_ee_sphere()
+        reward, metric = self._reward_tracking_ee_sphere()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[~walking_mask] = 0
         metric[~walking_mask] = 0
         return reward, metric
 
     def _reward_tracking_ee_sphere_standing(self):
-        reward, metric = self.env._reward_tracking_ee_sphere()
+        reward, metric = self._reward_tracking_ee_sphere()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[walking_mask] = 0
         metric[walking_mask] = 0
@@ -43,7 +44,7 @@ class ManipLoco_rewards:
     def _reward_tracking_ee_orn(self):
         ee_orn_euler = torch.stack(euler_from_quat(self.env.ee_orn), dim=-1)
         orn_err = torch.sum(torch.abs(torch_wrap_to_pi_minuspi(self.env.ee_goal_orn_euler - ee_orn_euler)) * self.env.orn_error_scale, dim=1)
-        return torch.exp(-orn_err/self.env.cfg.rewards.tracking_ee_sigma), orn_err
+        return torch.exp(-orn_err/self.env.cfg.rewards.tracking_ee_sigma), torch.rad2deg(orn_err)
 
     def _reward_arm_energy_abs_sum(self):
         energy = torch.sum(torch.abs(self.env.torques[:, 12:-self.env.cfg.env.num_gripper_joints] * self.env.dof_vel[:, 12:-self.env.cfg.env.num_gripper_joints]), dim = 1)
@@ -52,13 +53,13 @@ class ManipLoco_rewards:
     def _reward_tracking_ee_orn_ry(self):
         ee_orn_euler = torch.stack(euler_from_quat(self.env.ee_orn), dim=-1)
         orn_err = torch.sum(torch.abs((torch_wrap_to_pi_minuspi(self.env.ee_goal_orn_euler - ee_orn_euler) * self.env.orn_error_scale)[:, [0, 2]]), dim=1)
-        return torch.exp(-orn_err/self.env.cfg.rewards.tracking_ee_sigma), orn_err
+        return torch.exp(-orn_err/self.env.cfg.rewards.tracking_ee_sigma), torch.rad2deg(orn_err)
 
     # -------------B1: Reward functions----------------
 
     def _reward_hip_action_l2(self):
         action_l2 = torch.sum(self.env.actions[:, [0, 3, 6, 9]] ** 2, dim=1)
-        return action_l2, action_l2
+        return action_l2, torch.sqrt(action_l2)
 
     def _reward_leg_energy_abs_sum(self):
         energy = torch.sum(torch.abs(self.env.torques[:, :12] * self.env.dof_vel[:, :12]), dim = 1)
@@ -70,16 +71,16 @@ class ManipLoco_rewards:
     
     def _reward_leg_action_l2(self):
         action_l2 = torch.sum(self.env.actions[:, :12] ** 2, dim=1)
-        return action_l2, action_l2
+        return action_l2, torch.sqrt(action_l2)
     
     def _reward_leg_energy(self):
         energy = torch.sum(self.env.torques[:, :12] * self.env.dof_vel[:, :12], dim = 1)
-        return energy, energy
+        return energy, torch.abs(energy)
     
     def _reward_tracking_lin_vel(self):
         # Tracking of linear velocity commands (xy axes)
         lin_vel_error = torch.sum(torch.square(self.env.commands[:, :2] - self.env.base_lin_vel[:, :2]), dim=1)
-        return torch.exp(-lin_vel_error/self.env.cfg.rewards.tracking_sigma), lin_vel_error
+        return torch.exp(-lin_vel_error/self.env.cfg.rewards.tracking_sigma), torch.sqrt(lin_vel_error)
 
     def _reward_tracking_lin_vel_x_l1(self):
         zero_cmd_indices = torch.abs(self.env.commands[:, 0]) < 1e-5
@@ -104,11 +105,11 @@ class ManipLoco_rewards:
 
     def _reward_tracking_lin_vel_y_l2(self):
         squared_error = (self.env.commands[:, 1] - self.env.base_lin_vel[:, 1]) ** 2
-        return squared_error, squared_error
+        return squared_error, torch.sqrt(squared_error)
     
     def _reward_tracking_lin_vel_z_l2(self):
         squared_error = (self.env.commands[:, 2] - self.env.base_lin_vel[:, 2]) ** 2
-        return squared_error, squared_error
+        return squared_error, torch.sqrt(squared_error)
     
     def _reward_survive(self):
         survival_reward = torch.ones(self.env.num_envs, device=self.env.device)
@@ -116,34 +117,34 @@ class ManipLoco_rewards:
 
     def _reward_foot_contacts_z(self):
         foot_contacts_z = torch.square(self.env.force_sensor_tensor[:, :, 2]).sum(dim=-1)
-        return foot_contacts_z, foot_contacts_z
+        return foot_contacts_z, torch.sqrt(foot_contacts_z)
 
     def _reward_torques(self):
         # Penalize torques
         torque = torch.sum(torch.square(self.env.torques), dim=1)
-        return torque, torque
+        return torque, torch.sqrt(torque)
     
     def _reward_energy_square(self):
         energy = torch.sum(torch.square(self.env.torques[:, :12] * self.env.dof_vel[:, :12]), dim=1)
-        return energy, energy
+        return energy, torch.sqrt(energy)
 
     def _reward_tracking_lin_vel_y(self):
         cmd = self.env.commands[:, 1].clone()
         lin_vel_y_error = torch.square(cmd - self.env.base_lin_vel[:, 1])
         rew = torch.exp(-lin_vel_y_error/self.env.cfg.rewards.tracking_sigma)
-        return rew, lin_vel_y_error
+        return rew, torch.sqrt(lin_vel_y_error)
     
     def _reward_lin_vel_z(self):
         rew = torch.square(self.env.base_lin_vel[:, 2])
-        return rew, rew
+        return rew, torch.sqrt(rew)
     
     def _reward_ang_vel_xy(self):
         rew = torch.sum(torch.square(self.env.base_ang_vel[:, :2]), dim=1)
-        return rew, rew
+        return rew, torch.sqrt(rew)
     
     def _reward_tracking_ang_vel(self):
         ang_vel_error = torch.square(self.env.commands[:, 2] - self.env.base_ang_vel[:, 2])
-        return torch.exp(-ang_vel_error/self.env.cfg.rewards.tracking_sigma), ang_vel_error
+        return torch.exp(-ang_vel_error/self.env.cfg.rewards.tracking_sigma), torch.sqrt(ang_vel_error)
     
     def _reward_work(self):
         work = self.env.torques * self.env.dof_vel
@@ -152,21 +153,21 @@ class ManipLoco_rewards:
     
     def _reward_dof_acc(self):
         rew = torch.sum(torch.square((self.env.last_dof_vel - self.env.dof_vel)[:, :12] / self.env.dt), dim=1)
-        return rew, rew
+        return rew, torch.sqrt(rew)
     
     def _reward_action_rate(self):
         action_rate = torch.sum(torch.square(self.env.last_actions - self.env.actions)[:, :12], dim=1)
-        return action_rate, action_rate
+        return action_rate, torch.sqrt(action_rate)
     
     def _reward_dof_pos_limits(self):
         out_of_limits = -(self.env.dof_pos - self.env.dof_pos_limits[:, 0]).clip(max=0.) # lower limit
         out_of_limits += (self.env.dof_pos - self.env.dof_pos_limits[:, 1]).clip(min=0.) # upper limit
         rew = torch.sum(out_of_limits[:, :12], dim=1)
-        return rew, rew
+        return rew, torch.rad2deg(rew)
     
     def _reward_delta_torques(self):
         rew = torch.sum(torch.square(self.env.torques - self.env.last_torques)[:, :12], dim=1)
-        return rew, rew
+        return rew, torch.sqrt(rew)
     
     def _reward_collision(self):
         rew = torch.sum(1.*(torch.norm(self.env.contact_forces[:, self.env.penalized_contact_indices, :], dim=-1) > 0.1), dim=1)
@@ -176,29 +177,39 @@ class ManipLoco_rewards:
         # Penalize motion at zero commands
         dof_error = torch.sum(torch.abs(self.env.dof_pos - self.env.default_dof_pos)[:, :12], dim=1)
         rew = torch.exp(-dof_error*0.05)
-        rew[self.env._get_walking_cmd_mask()] = 0.
-        return rew, rew
+        walking_mask = self.env._get_walking_cmd_mask()
+        rew[walking_mask] = 0.
+        metric = torch.rad2deg(dof_error / 12.0)
+        metric[walking_mask] = 0.
+        return rew, metric
 
     def _reward_walking_dof(self):
         # Penalize motion at zero commands
         dof_error = torch.sum(torch.abs(self.env.dof_pos - self.env.default_dof_pos)[:, :12], dim=1)
         rew = torch.exp(-dof_error*0.05)
-        rew[~self.env._get_walking_cmd_mask()] = 0.
-        return rew, rew
+        walking_mask = self.env._get_walking_cmd_mask()
+        rew[~walking_mask] = 0.
+        metric = torch.rad2deg(dof_error / 12.0)
+        metric[~walking_mask] = 0.
+        return rew, metric
 
     def _reward_hip_pos(self):
         rew = torch.sum(torch.square(self.env.dof_pos[:, self.env.hip_indices] - self.env.default_dof_pos[self.env.hip_indices]), dim=1)
-        return rew, rew
+        return rew, torch.rad2deg(torch.sqrt(rew / len(self.env.hip_indices)))
 
     def _reward_feet_jerk(self):
         if not hasattr(self.env, "last_contact_forces"):
             result = torch.zeros(self.env.num_envs).to(self.env.device)
+            metric = result.clone()
         else:
-            result = torch.sum(torch.norm(self.env.force_sensor_tensor - self.env.last_contact_forces, dim=-1), dim=-1)
+            force_delta = torch.norm(self.env.force_sensor_tensor - self.env.last_contact_forces, dim=-1)
+            result = torch.sum(force_delta, dim=-1)
+            metric = result / force_delta.shape[1]
         
         self.env.last_contact_forces = self.env.force_sensor_tensor.clone()
         result[self.env.episode_length_buf<50] = 0.
-        return result, result
+        metric[self.env.episode_length_buf<50] = 0.
+        return result, metric
     
     def _reward_alive(self):
         return 1., 1.
@@ -207,7 +218,8 @@ class ManipLoco_rewards:
         feet_xyz_vel = torch.abs(self.env.rigid_body_state[:, self.env.feet_indices, 7:10]).sum(dim=-1)
         dragging_vel = self.env.foot_contacts_from_sensor * feet_xyz_vel
         rew = dragging_vel.sum(dim=-1)
-        return rew, rew
+        metric = rew / self.env.foot_contacts_from_sensor.float().sum(dim=1).clamp(min=1.0)
+        return rew, metric
 
     def _reward_feet_contact_forces(self):
         reset_flag = (self.env.episode_length_buf > 2./self.env.dt).type(torch.float)
@@ -218,70 +230,77 @@ class ManipLoco_rewards:
     def _reward_orientation(self):
         # Penalize non flat base orientation
         error = torch.sum(torch.square(self.env.projected_gravity[:, :2]), dim=1)
-        return error, error
-    
+        return error, torch.rad2deg(torch.asin(torch.sqrt(error.clamp(min=0.0, max=1.0))))
+
     def _reward_roll(self):
         # Penalize non flat base orientation
         roll = self.env._get_body_orientation()[:, 0]
         error = torch.abs(roll)
-        return error, error
+        return error, torch.rad2deg(error)
+
+    def _reward_pitch(self):
+        # Penalize non flat base orientation
+        pitch = self.env._get_body_orientation()[:, 1]
+        error = torch.abs(pitch)
+        return error, torch.rad2deg(error)
     
     def _reward_base_height(self):
         # Penalize base height away from target
         base_height = torch.mean(self.env.root_states[:, 2].unsqueeze(1), dim=1)
-        return torch.abs(base_height - self.env.cfg.rewards.base_height_target), base_height
+        error = torch.abs(base_height - self.env.cfg.rewards.base_height_target)
+        return error, error
     
     def _reward_orientation_walking(self):
-        reward, metric = self.env._reward_orientation()
+        reward, metric = self._reward_orientation()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[~walking_mask] = 0
         metric[~walking_mask] = 0
         return reward, metric
-    
+
     def _reward_orientation_standing(self):
-        reward, metric = self.env._reward_orientation()
+        reward, metric = self._reward_orientation()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[walking_mask] = 0
         metric[walking_mask] = 0
         return reward, metric
 
     def _reward_torques_walking(self):
-        reward, metric = self.env._reward_torques()
+        reward, metric = self._reward_torques()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[~walking_mask] = 0
         metric[~walking_mask] = 0
         return reward, metric
 
     def _reward_torques_standing(self):
-        reward, metric = self.env._reward_torques()
+        reward, metric = self._reward_torques()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[walking_mask] = 0
         metric[walking_mask] = 0
         return reward, metric
     
     def _reward_energy_square_walking(self):
-        reward, metric = self.env._reward_energy_square()
+        reward, metric = self._reward_energy_square()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[~walking_mask] = 0
         metric[~walking_mask] = 0
         return reward, metric
     
     def _reward_energy_square_standing(self):
-        reward, metric = self.env._reward_energy_square()
+        reward, metric = self._reward_energy_square()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[walking_mask] = 0
         metric[walking_mask] = 0
         return reward, metric
 
     def _reward_base_height_walking(self):
-        reward, metric = self.env._reward_base_height()
+        reward, metric = self._reward_base_height()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[~walking_mask] = 0
         metric[~walking_mask] = 0
         return reward, metric
 
     def _reward_base_height_standing(self):
-        reward, metric = self.env._reward_base_height()
+        reward, metric = self._reward_base_height()
         walking_mask = self.env._get_walking_cmd_mask()
         reward[walking_mask] = 0
         metric[walking_mask] = 0
@@ -290,19 +309,23 @@ class ManipLoco_rewards:
     def _reward_dof_default_pos(self):
         dof_error = torch.sum(torch.abs(self.env.dof_pos - self.env.default_dof_pos)[:, :12], dim=1)
         rew = torch.exp(-dof_error*0.05)
-        
-        return rew, rew
+        return rew, torch.rad2deg(dof_error / 12.0)
     
     def _reward_dof_error(self):
         dof_error = torch.sum(torch.square(self.env.dof_pos - self.env.default_dof_pos)[:, :12], dim=1)
-        return dof_error, dof_error
+        return dof_error, torch.rad2deg(torch.sqrt(dof_error / 12.0))
     
     def _reward_tracking_lin_vel_max(self):
-        rew = torch.where(self.env.commands[:, 0] > 0, torch.minimum(self.env.base_lin_vel[:, 0], self.env.commands[:, 0]) / (self.env.commands[:, 0] + 1e-5), \
-                          torch.minimum(-self.env.base_lin_vel[:, 0], -self.env.commands[:, 0]) / (-self.env.commands[:, 0] + 1e-5))
-        zero_cmd_indices = torch.abs(self.env.commands[:, 0]) < self.env.cfg.commands.lin_vel_x_clip
-        rew[zero_cmd_indices] = torch.exp(-torch.abs(self.env.base_lin_vel[:, 0]))[zero_cmd_indices]
-        return rew, rew
+        cmd_x = self.env.commands[:, 0]
+        vel_x = self.env.base_lin_vel[:, 0]
+        abs_cmd_x = torch.abs(cmd_x)
+        tracked_vel_x = torch.where(cmd_x > 0, torch.minimum(vel_x, cmd_x), torch.minimum(-vel_x, -cmd_x))
+        rew = tracked_vel_x / (abs_cmd_x + 1e-5)
+        zero_cmd_indices = abs_cmd_x < self.env.cfg.commands.lin_vel_x_clip
+        rew[zero_cmd_indices] = torch.exp(-torch.abs(vel_x))[zero_cmd_indices]
+        metric = (abs_cmd_x - tracked_vel_x).clamp(min=0.0)
+        metric[zero_cmd_indices] = torch.abs(vel_x)[zero_cmd_indices]
+        return rew, metric
     
     def _reward_penalty_lin_vel_y(self):
         rew = torch.abs(self.env.base_lin_vel[:, 1])
@@ -318,15 +341,14 @@ class ManipLoco_rewards:
         desired_contact = self.env.desired_contact_states
         transition_lower = getattr(self.env.cfg.rewards, "gait_transition_lower", 0.2)
         stable_swing = desired_contact < transition_lower
-
-        reward = 0
-        for i in range(4):
-            reward += stable_swing[:, i].float() * (
-                        1 - torch.exp(-1 * foot_forces[:, i] ** 2 / self.env.cfg.rewards.gait_force_sigma))
+        active_foot_forces = foot_forces * stable_swing.float()
+        reward = torch.sum(1 - torch.exp(-active_foot_forces ** 2 / self.env.cfg.rewards.gait_force_sigma), dim=1)
         
         cmd_stop_flag = ~self.env._get_walking_cmd_mask()
         reward[cmd_stop_flag] = 0
-        return reward / 4, reward / 4
+        metric = torch.sum(active_foot_forces, dim=1) / torch.sum(stable_swing.float(), dim=1).clamp(min=1.0)
+        metric[cmd_stop_flag] = 0
+        return reward / 4, metric
 
     def _reward_tracking_contacts_shaped_vel(self):
         if not self.env.cfg.env.observe_gait_commands:
@@ -335,14 +357,14 @@ class ManipLoco_rewards:
         desired_contact = self.env.desired_contact_states
         transition_upper = getattr(self.env.cfg.rewards, "gait_transition_upper", 0.8)
         stable_stance = desired_contact > transition_upper
-        reward = 0
-        for i in range(4):
-            reward += stable_stance[:, i].float() * (
-                        1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.cfg.rewards.gait_vel_sigma))
+        active_foot_velocities = foot_velocities * stable_stance.float()
+        reward = torch.sum(1 - torch.exp(-active_foot_velocities ** 2 / self.env.cfg.rewards.gait_vel_sigma), dim=1)
         
         cmd_stop_flag = ~self.env._get_walking_cmd_mask()
         reward[cmd_stop_flag] = 0
-        return reward / 4, reward / 4
+        metric = torch.sum(active_foot_velocities, dim=1) / torch.sum(stable_stance.float(), dim=1).clamp(min=1.0)
+        metric[cmd_stop_flag] = 0
+        return reward / 4, metric
     
     def _reward_feet_height(self):
         feet_height_tracking = self.env.cfg.rewards.feet_height_target
@@ -364,10 +386,16 @@ class ManipLoco_rewards:
         self.env.feet_air_time += self.env.dt
 
         if self.env.cfg.rewards.feet_aritime_allfeet:
-            rew_airTime = torch.sum((self.env.feet_air_time - 0.5) * first_contact, dim=1)
+            first_contact_float = first_contact.float()
+            air_time_at_contact = self.env.feet_air_time * first_contact_float
         else:
-            rew_airTime = torch.sum((self.env.feet_air_time[:, :2] - 0.5) * first_contact[:, :2], dim=1)
+            first_contact_float = first_contact[:, :2].float()
+            air_time_at_contact = self.env.feet_air_time[:, :2] * first_contact_float
+        first_contact_count = first_contact_float.sum(dim=1)
+        rew_airTime = torch.sum(air_time_at_contact - 0.5 * first_contact_float, dim=1)
         
         rew_airTime *= self.env._get_walking_cmd_mask()  # reward for stepping for any of the 3 motions
+        metric = torch.where(first_contact_count > 0, torch.sum(air_time_at_contact, dim=1) / first_contact_count, torch.zeros_like(rew_airTime))
+        metric *= self.env._get_walking_cmd_mask()
         self.env.feet_air_time *= ~ self.env.foot_contacts_from_sensor  #self.env.contact_filt
-        return rew_airTime, rew_airTime
+        return rew_airTime, metric

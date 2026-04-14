@@ -278,6 +278,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             alive = 1.0 # 奖励回合持续存活
             lin_vel_z = -1.5 # 惩罚机身上下晃动
             roll = -2 # 惩罚机身横滚倾斜
+            pitch = 0 # 惩罚机身俯仰倾斜
             hip_pos = -0.3 # 惩罚髋关节偏离默认
             base_height = -5.0 # 惩罚机身高度偏差
             base_height_walking = 0.0 # 惩罚行走时机身高度偏差

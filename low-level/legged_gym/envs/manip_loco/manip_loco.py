@@ -195,7 +195,7 @@ class ManipLoco(LeggedRobot):
             rew = rew * self.reward_scales[name]
             self.rew_buf += rew
             self.episode_sums[name] += rew
-            self.episode_metric_sums[name] += metric
+            self.episode_metric_sums[name] += metric * self.dt
         if self.cfg.rewards.only_positive_rewards:
             self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
         # add termination reward after clipping
@@ -204,7 +204,7 @@ class ManipLoco(LeggedRobot):
             rew = rew * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
-            self.episode_metric_sums["termination"] += metric
+            self.episode_metric_sums["termination"] += metric * self.dt
         
         self.rew_buf /= 100
 
@@ -215,7 +215,7 @@ class ManipLoco(LeggedRobot):
             rew = rew * self.arm_reward_scales[name]
             self.arm_rew_buf += rew
             self.episode_sums[name] += rew
-            self.episode_metric_sums[name] += metric
+            self.episode_metric_sums[name] += metric * self.dt
         if self.cfg.rewards.only_positive_rewards:
             self.arm_rew_buf[:] = torch.clip(self.arm_rew_buf[:], min=0.)
         # add termination reward after clipping
@@ -224,7 +224,7 @@ class ManipLoco(LeggedRobot):
             rew = rew * self.arm_reward_scales["arm_termination"]
             self.arm_rew_buf += rew
             self.episode_sums["arm_termination"] += rew
-            self.episode_metric_sums["arm_termination"] += metric
+            self.episode_metric_sums["arm_termination"] += metric * self.dt
 
         self.arm_rew_buf /= 100
 
