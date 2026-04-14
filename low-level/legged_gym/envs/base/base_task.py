@@ -106,7 +106,9 @@ class BaseTask():
 
         self.free_cam = False
         self.lookat_id = 0
-        self.lookat_vec = torch.tensor([-0, 2, 1], requires_grad=False, device=self.device)
+        self.lookat_vec_local = torch.tensor([-0, 2, 1], requires_grad=False, device=self.device)
+        self.lookat_follow_yaw = 0.0
+        self.camera_follow_yaw_update_threshold = np.deg2rad(20.0)
         self.camera_orbit_radius_min = 0.5
         self.camera_orbit_pitch_limit = np.deg2rad(85.0)
         self.camera_orbit_yaw_step = np.deg2rad(5.0)
@@ -183,9 +185,63 @@ class BaseTask():
     def lookat(self, i):
         if i < 0 or i >= self.num_envs:
             return
+        self._maybe_update_follow_yaw_anchor(i)
         look_at_pos = self.root_states[i, :3].clone()
-        cam_pos = look_at_pos + self.lookat_vec
+        cam_pos = look_at_pos + self._follow_vector_local_to_world(
+            self.lookat_vec_local,
+            i,
+            yaw=self.lookat_follow_yaw,
+        )
         self.set_camera(cam_pos, look_at_pos)
+
+    def _get_follow_yaw(self, i):
+        base_quat = self.root_states[i, 3:7]
+        x, y, z, w = [float(v) for v in base_quat]
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        return np.arctan2(siny_cosp, cosy_cosp)
+
+    def _wrap_to_pi(self, angle):
+        return (angle + np.pi) % (2.0 * np.pi) - np.pi
+
+    def _reset_follow_yaw_anchor(self, i):
+        self.lookat_follow_yaw = self._get_follow_yaw(i)
+
+    def _maybe_update_follow_yaw_anchor(self, i):
+        current_yaw = self._get_follow_yaw(i)
+        yaw_error = self._wrap_to_pi(current_yaw - self.lookat_follow_yaw)
+        if abs(yaw_error) >= self.camera_follow_yaw_update_threshold:
+            self.lookat_follow_yaw = current_yaw
+
+    def _follow_vector_local_to_world(self, vec_local, i, yaw=None):
+        yaw = self._get_follow_yaw(i) if yaw is None else yaw
+        cos_yaw = np.cos(yaw)
+        sin_yaw = np.sin(yaw)
+        return torch.tensor(
+            [
+                cos_yaw * vec_local[0].item() - sin_yaw * vec_local[1].item(),
+                sin_yaw * vec_local[0].item() + cos_yaw * vec_local[1].item(),
+                vec_local[2].item(),
+            ],
+            requires_grad=False,
+            device=self.device,
+            dtype=torch.float,
+        )
+
+    def _follow_vector_world_to_local(self, vec_world, i, yaw=None):
+        yaw = self._get_follow_yaw(i) if yaw is None else yaw
+        cos_yaw = np.cos(yaw)
+        sin_yaw = np.sin(yaw)
+        return torch.tensor(
+            [
+                cos_yaw * vec_world[0].item() + sin_yaw * vec_world[1].item(),
+                -sin_yaw * vec_world[0].item() + cos_yaw * vec_world[1].item(),
+                vec_world[2].item(),
+            ],
+            requires_grad=False,
+            device=self.device,
+            dtype=torch.float,
+        )
 
     def _get_viewer_camera_position(self):
         cam_transform = self.gym.get_viewer_camera_transform(self.viewer, None).p
@@ -197,19 +253,19 @@ class BaseTask():
         )
 
     def _orbit_camera(self, delta_yaw=0.0, delta_pitch=0.0, delta_radius=0.0):
-        radius = torch.norm(self.lookat_vec).item()
+        radius = torch.norm(self.lookat_vec_local).item()
         if radius < 1e-6:
             radius = 1.0
 
-        yaw = np.arctan2(self.lookat_vec[1].item(), self.lookat_vec[0].item())
-        pitch = np.arcsin(np.clip(self.lookat_vec[2].item() / radius, -1.0, 1.0))
+        yaw = np.arctan2(self.lookat_vec_local[1].item(), self.lookat_vec_local[0].item())
+        pitch = np.arcsin(np.clip(self.lookat_vec_local[2].item() / radius, -1.0, 1.0))
 
         radius = max(self.camera_orbit_radius_min, radius + delta_radius)
         pitch = np.clip(pitch + delta_pitch, -self.camera_orbit_pitch_limit, self.camera_orbit_pitch_limit)
         yaw = yaw + delta_yaw
 
         cos_pitch = np.cos(pitch)
-        self.lookat_vec = torch.tensor(
+        self.lookat_vec_local = torch.tensor(
             [
                 radius * cos_pitch * np.cos(yaw),
                 radius * cos_pitch * np.sin(yaw),
@@ -233,13 +289,16 @@ class BaseTask():
         if not self.free_cam:
             for i in range(min(9, self.num_envs)):
                 if evt.action == "lookat" + str(i) and evt.value > 0:
+                    self._reset_follow_yaw_anchor(i)
                     self.lookat(i)
                     self.lookat_id = i
             if evt.action == "prev_id" and evt.value > 0:
                 self.lookat_id  = (self.lookat_id-1) % self.num_envs
+                self._reset_follow_yaw_anchor(self.lookat_id)
                 self.lookat(self.lookat_id)
             if evt.action == "next_id" and evt.value > 0:
                 self.lookat_id  = (self.lookat_id+1) % self.num_envs
+                self._reset_follow_yaw_anchor(self.lookat_id)
                 self.lookat(self.lookat_id)
             if evt.action == "camera_orbit_left" and evt.value > 0:
                 self._orbit_camera(delta_yaw=-self.camera_orbit_yaw_step)
@@ -261,7 +320,12 @@ class BaseTask():
                 # transition stays continuous instead of snapping to a preset view.
                 cam_trans = self._get_viewer_camera_position()
                 look_at_pos = self.root_states[self.lookat_id, :3].clone()
-                self.lookat_vec = cam_trans - look_at_pos
+                self._reset_follow_yaw_anchor(self.lookat_id)
+                self.lookat_vec_local = self._follow_vector_world_to_local(
+                    cam_trans - look_at_pos,
+                    self.lookat_id,
+                    yaw=self.lookat_follow_yaw,
+                )
         
         if evt.action == "pause" and evt.value > 0:
             self.pause = True
@@ -304,4 +368,8 @@ class BaseTask():
             if not self.free_cam:
                 cam_trans = self._get_viewer_camera_position()
                 look_at_pos = self.root_states[self.lookat_id, :3].clone()
-                self.lookat_vec = cam_trans - look_at_pos
+                self.lookat_vec_local = self._follow_vector_world_to_local(
+                    cam_trans - look_at_pos,
+                    self.lookat_id,
+                    yaw=self.lookat_follow_yaw,
+                )

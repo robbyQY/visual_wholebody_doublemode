@@ -8,6 +8,37 @@ class ManipLoco_rewards:
     def load_env(self, env):
         self.env = env
 
+    def _get_base_height(self):
+        return self.env.root_states[:, 2]
+
+    def _get_height_conditioned_leg_reference(self):
+        stand_ref = self.env.default_dof_pos[:12]
+        crouch_ref = stand_ref.clone()
+        for dof_idx, dof_name in enumerate(self.env.dof_names[:12]):
+            if "hip" in dof_name:
+                crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_hip_delta
+            elif "thigh" in dof_name:
+                crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_thigh_delta
+            elif "calf" in dof_name:
+                crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_calf_delta
+
+        stand_height = float(self.env.cfg.rewards.posture_reference_stand_height)
+        crouch_height = float(self.env.cfg.rewards.posture_reference_crouch_height)
+        height_span = max(stand_height - crouch_height, 1e-6)
+        alpha = ((stand_height - self._get_base_height()) / height_span).clamp(0.0, 1.0)
+        return torch.lerp(
+            stand_ref.unsqueeze(0).expand(self.env.num_envs, -1),
+            crouch_ref.unsqueeze(0).expand(self.env.num_envs, -1),
+            alpha.unsqueeze(1),
+        )
+
+    def _get_leg_posture_tracking_reward(self):
+        ref = self._get_height_conditioned_leg_reference()
+        dof_error = torch.sum(torch.abs(self.env.dof_pos[:, :12] - ref), dim=1)
+        reward = torch.exp(-dof_error * self.env.cfg.rewards.leg_posture_exp_scale)
+        metric = torch.rad2deg(dof_error / 12.0)
+        return reward, metric
+
     # -------------Z1: Reward functions----------------
 
     def _reward_tracking_ee_sphere(self):
@@ -183,6 +214,14 @@ class ManipLoco_rewards:
         metric[walking_mask] = 0.
         return rew, metric
 
+    def _reward_stand_still_flexible(self):
+        # Reward leg postures that stay near the height-conditioned support template at zero commands.
+        rew, metric = self._get_leg_posture_tracking_reward()
+        walking_mask = self.env._get_walking_cmd_mask()
+        rew[walking_mask] = 0.
+        metric[walking_mask] = 0.
+        return rew, metric
+
     def _reward_walking_dof(self):
         # Penalize motion at zero commands
         dof_error = torch.sum(torch.abs(self.env.dof_pos - self.env.default_dof_pos)[:, :12], dim=1)
@@ -193,8 +232,21 @@ class ManipLoco_rewards:
         metric[~walking_mask] = 0.
         return rew, metric
 
+    def _reward_walking_dof_flexible(self):
+        # Reward leg postures that stay near the height-conditioned support template while moving.
+        rew, metric = self._get_leg_posture_tracking_reward()
+        walking_mask = self.env._get_walking_cmd_mask()
+        rew[~walking_mask] = 0.
+        metric[~walking_mask] = 0.
+        return rew, metric
+
     def _reward_hip_pos(self):
         rew = torch.sum(torch.square(self.env.dof_pos[:, self.env.hip_indices] - self.env.default_dof_pos[self.env.hip_indices]), dim=1)
+        return rew, torch.rad2deg(torch.sqrt(rew / len(self.env.hip_indices)))
+
+    def _reward_hip_pos_flexible(self):
+        ref = self._get_height_conditioned_leg_reference()
+        rew = torch.sum(torch.square(self.env.dof_pos[:, self.env.hip_indices] - ref[:, self.env.hip_indices]), dim=1)
         return rew, torch.rad2deg(torch.sqrt(rew / len(self.env.hip_indices)))
 
     def _reward_feet_jerk(self):
@@ -246,8 +298,24 @@ class ManipLoco_rewards:
     
     def _reward_base_height(self):
         # Penalize base height away from target
-        base_height = torch.mean(self.env.root_states[:, 2].unsqueeze(1), dim=1)
+        base_height = self._get_base_height()
         error = torch.abs(base_height - self.env.cfg.rewards.base_height_target)
+        return error, error
+
+    def _reward_base_height_nominal(self):
+        # Weak nominal preference used only as a tie-breaker when multiple heights solve the task equally well.
+        base_height = self._get_base_height()
+        error = torch.abs(base_height - self.env.cfg.rewards.base_height_target)
+        return torch.square(error), error
+
+    def _reward_base_height_band(self):
+        # Allow free height selection inside the admissible band and only penalize leaving it.
+        base_height = self._get_base_height()
+        low = float(self.env.cfg.rewards.base_height_target_min)
+        high = float(self.env.cfg.rewards.base_height_target_max)
+        below = (low - base_height).clip(min=0.0)
+        above = (base_height - high).clip(min=0.0)
+        error = below + above
         return error, error
     
     def _reward_orientation_walking(self):

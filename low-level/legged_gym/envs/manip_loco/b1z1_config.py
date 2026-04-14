@@ -248,6 +248,17 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         soft_dof_vel_limit = 1.
         soft_torque_limit = 0.4
         base_height_target = 0.55
+        base_height_target_min = 0.3
+        base_height_target_max = 0.7
+        posture_reference_stand_height = 0.55
+        posture_reference_crouch_height = 0.35
+        leg_posture_exp_scale = 0.05
+        # Height-conditioned leg-posture prior.
+        # The stand template is the default leg posture. The crouch template is built by adding
+        # these deltas to each leg's hip/thigh/calf joints, then interpolating by current trunk height.
+        crouch_hip_delta = 0.0
+        crouch_thigh_delta = 0.35
+        crouch_calf_delta = -0.55
         max_contact_force = 40.  # forces above this value are penalized
         # -------Gait control Para. ---------
         gait_vel_sigma = 0.5
@@ -259,6 +270,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
 
         feet_aritime_allfeet = False
         feet_height_allfeet = False
+        reward_scale_preset = "legacy"  # "height_flexible" | "legacy"
         # Scales set to 0 or None will both be skipped in the current reward setup
         # Disabled terms are neither computed nor logged as reward metrics
         class scales:
@@ -277,13 +289,18 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
 
             # -------Posture and task rewards ---------
             stand_still = 1.0 # 奖励静止时站稳
+            stand_still_flexible = 0.0 # 奖励静止时站稳（Height-flexible）
             walking_dof = 1.5 # 奖励行走时关节规整
+            walking_dof_flexible = 0.0 # 奖励行走时关节规整（Height-flexible）
             alive = 1.0 # 奖励回合持续存活
             lin_vel_z = -1.5 # 惩罚机身上下晃动
-            roll = -2 # 惩罚机身横滚倾斜
-            pitch = 0 # 惩罚机身俯仰倾斜
+            roll = -2.0 # 惩罚机身横滚倾斜
+            pitch = 0.0 # 惩罚机身俯仰倾斜
             hip_pos = -0.3 # 惩罚髋关节偏离默认
+            hip_pos_flexible = 0.0 # 惩罚髋关节偏离默认（Height-flexible）
             base_height = -5.0 # 惩罚机身高度偏差
+            base_height_nominal = 0.0 # 在允许区间内弱偏好回到默认高度（Height-flexible）
+            base_height_band = 0.0 # 惩罚机身高度偏差（Height-flexible）
             base_height_walking = 0.0 # 惩罚行走时机身高度偏差
             base_height_standing = 0.0 # 惩罚站立时机身高度偏差
             dof_default_pos = 0.0 # 奖励关节贴近默认位
@@ -311,6 +328,43 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             feet_jerk = -0.0002 # 惩罚足端冲击突变
             feet_drag = -0.08 # 惩罚足端拖地滑动
             feet_contact_forces = -0.001 # 惩罚足端接触力过大
+
+        class scale_presets:
+            legacy = {
+                "stand_still": 1.0,
+                "walking_dof": 1.5,
+                "hip_pos": -0.3,
+                "base_height": -5.0,
+                "stand_still_flexible": 0.0,
+                "walking_dof_flexible": 0.0,
+                "pitch": 0.0,
+                "hip_pos_flexible": 0.0,
+                "base_height_nominal": 0.0,
+                "base_height_band": 0.0,
+                "orientation": 0.0,
+                "ang_vel_xy": -0.2,
+            }
+            height_flexible = {
+                "stand_still": 0.0,
+                "walking_dof": 0.0,
+                "hip_pos": 0.0,
+                "base_height": 0.0,
+                "stand_still_flexible": 1.0,
+                "walking_dof_flexible": 1.5,
+                "pitch": -2.0,
+                "hip_pos_flexible": -0.1,
+                "base_height_nominal": -0.25,
+                "base_height_band": -5.0,
+                "orientation": -6.0,
+                "ang_vel_xy": -0.4,
+            }
+
+        _selected_reward_scale_preset = getattr(scale_presets, reward_scale_preset, None)
+        if _selected_reward_scale_preset is None:
+            raise ValueError(f"Unsupported rewards.reward_scale_preset={reward_scale_preset}")
+        for _reward_name, _reward_scale in _selected_reward_scale_preset.items():
+            setattr(scales, _reward_name, _reward_scale)
+        del _selected_reward_scale_preset, _reward_name, _reward_scale
 
         class arm_scales:
             arm_termination = None # 惩罚机械臂回合终止
