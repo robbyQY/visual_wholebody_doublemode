@@ -68,6 +68,12 @@ FLOAT_CHECKPOINT_FEATURES = {
     "gait_frequency_ang_vel_ref",
     "gait_frequency_ang_vel_weight",
 }
+PLAYBACK_CURRICULUM_SCHEDULE_NAMES = (
+    "lin_vel_x_min_schedule",
+    "lin_vel_x_max_schedule",
+    "ang_vel_yaw_schedule",
+    "non_omni_pos_y_schedule",
+)
 
 def get_log_root():
     return os.environ.get("LEGGED_GYM_LOG_ROOT", os.path.join(LEGGED_GYM_ROOT_DIR, "logs"))
@@ -384,6 +390,75 @@ def apply_checkpoint_features_from_run(args, log_dir, verbose=True, filename=Non
         print(f"Loaded checkpoint features from {source}: {_format_checkpoint_feature_summary(args)}")
     return args, metadata
 
+def apply_play_env_schedules_from_metadata(env_cfg, metadata, verbose=True):
+    if env_cfg is None or metadata is None:
+        return {}
+
+    commands_cfg = metadata.get("env_cfg", {}).get("commands", {})
+    restored = {}
+    for schedule_name in PLAYBACK_CURRICULUM_SCHEDULE_NAMES:
+        if schedule_name not in commands_cfg:
+            continue
+        schedule_value = _parse_schedule_arg(commands_cfg[schedule_name])
+        if schedule_value is None:
+            continue
+        setattr(env_cfg.commands, schedule_name, schedule_value)
+        restored[schedule_name] = schedule_value
+
+    if verbose and restored:
+        source = metadata.get("_source", "<unknown>")
+        summary = ", ".join(f"{name}={value}" for name, value in restored.items())
+        print(f"Loaded playback schedules from {source}: {summary}")
+    return restored
+
+def configure_playback_curriculum(env_cfg, args, metadata=None, verbose=True):
+    if env_cfg is None:
+        return None
+
+    curriculum_iter = getattr(args, "curriculum_iter", None)
+    curriculum_progress = getattr(args, "curriculum_progress", None)
+    if curriculum_iter is not None and curriculum_progress is not None:
+        raise ValueError("Use only one of --curriculum_iter or --curriculum_progress.")
+
+    if curriculum_iter is None and curriculum_progress is None:
+        return None
+
+    total_iterations = None
+    if metadata is not None:
+        total_iterations = metadata.get("train_cfg", {}).get("runner", {}).get("max_iterations")
+
+    if curriculum_progress is not None:
+        curriculum_progress = float(curriculum_progress)
+        if not (0.0 <= curriculum_progress <= 1.0):
+            raise ValueError(f"--curriculum_progress must be within [0, 1], got {curriculum_progress}.")
+        if total_iterations is None:
+            raise ValueError(
+                "Cannot use --curriculum_progress because max_iterations is missing from run metadata."
+            )
+        curriculum_iter = curriculum_progress * float(total_iterations)
+    else:
+        curriculum_iter = float(curriculum_iter)
+
+    setattr(env_cfg.commands, "curriculum_playback_counter", curriculum_iter)
+    setattr(
+        env_cfg.commands,
+        "curriculum_playback_total_iterations",
+        float(total_iterations) if total_iterations is not None else None,
+    )
+
+    if verbose:
+        if total_iterations is None:
+            print(f"Playback curriculum counter set to iteration {curriculum_iter:g}.")
+        else:
+            print(
+                f"Playback curriculum counter set to iteration {curriculum_iter:g} "
+                f"(training max_iterations={float(total_iterations):g})."
+            )
+    return {
+        "curriculum_iter": curriculum_iter,
+        "total_iterations": float(total_iterations) if total_iterations is not None else None,
+    }
+
 def set_seed(seed, verbose=True):
     if seed == -1:
         seed = np.random.randint(0, 10000)
@@ -631,6 +706,8 @@ def get_args(test=False):
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--non_omni_pos_y_schedule", "type": str, "help": "Curriculum for the symmetric non-omnidirectional EE goal yaw range magnitude as comma-separated values: start,end or start,end,start_iter,end_iter. Applied as [-value, value]."},
+        {"name": "--curriculum_iter", "type": float, "help": "Playback-only schedule counter used to initialize command and non-omni goal-yaw curricula at a specific training iteration."},
+        {"name": "--curriculum_progress", "type": float, "help": "Playback-only normalized schedule progress in [0, 1]. Uses the checkpoint run's max_iterations from run metadata."},
         {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,end_iter or start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedual", "type": str, "help": "Deprecated alias for --priv_reg_coef_schedule."},

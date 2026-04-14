@@ -271,7 +271,9 @@ class BaseTask():
                 for evt in self.gym.query_viewer_action_events(self.viewer):
                     if evt.action == "pause" and evt.value > 0:
                         self.pause = False
-        
+
+    def on_viewer_events_processed(self):
+        pass
 
     def render(self, sync_frame_time=True):
         if self.viewer:
@@ -283,6 +285,7 @@ class BaseTask():
             # check for keyboard events
             for evt in self.gym.query_viewer_action_events(self.viewer):
                 self.handle_viewer_action_event(evt)
+            self.on_viewer_events_processed()
 
             # fetch results
             if self.device != 'cpu':

@@ -110,17 +110,17 @@ class OnPolicyRunner:
         self.curriculum_state["Schedule/lin_vel_x_command_max"] = lin_vel_x_max
 
         ang_vel_yaw_max = resolve_schedule_value(self.env.cfg.commands.ang_vel_yaw_schedule, iteration, default_end_iter=total_iterations)
-        ang_vel_yaw_min = -ang_vel_yaw_max
-        self.env.command_ranges["ang_vel_yaw"] = [ang_vel_yaw_min, ang_vel_yaw_max]
-        self.curriculum_state["Schedule/ang_vel_yaw_command_min"] = ang_vel_yaw_min
-        self.curriculum_state["Schedule/ang_vel_yaw_command_max"] = ang_vel_yaw_max
+        self.env.command_ranges["ang_vel_yaw"] = [-ang_vel_yaw_max, ang_vel_yaw_max]
+        self.curriculum_state["Schedule/ang_vel_yaw_command"] = ang_vel_yaw_max
 
         if not self.env.omnidirectional_pos_y:
-            non_omni_pos_y_max = abs(resolve_schedule_value(self.env.cfg.commands.non_omni_pos_y_schedule, iteration, default_end_iter=total_iterations))
-            non_omni_pos_y_min = -non_omni_pos_y_max
-            self.curriculum_state["Schedule/non_omni_goal_yaw_min"] = non_omni_pos_y_min
-            self.curriculum_state["Schedule/non_omni_goal_yaw_max"] = non_omni_pos_y_max
-            self.env.goal_ee_ranges["pos_y"] = [non_omni_pos_y_min, non_omni_pos_y_max]
+            non_omni_goal_yaw = abs(resolve_schedule_value(
+                self.env.cfg.commands.non_omni_pos_y_schedule,
+                iteration,
+                default_end_iter=total_iterations,
+            ))
+            self.env.goal_ee_ranges["pos_y"] = [-non_omni_goal_yaw, non_omni_goal_yaw]
+            self.curriculum_state["Schedule/non_omni_goal_yaw"] = non_omni_goal_yaw
     
     def set_it(self, it):
         self.current_learning_iteration = it

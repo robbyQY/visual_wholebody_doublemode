@@ -329,6 +329,8 @@ class ManipLoco(LeggedRobot):
         """
         if len(env_ids) == 0:
             return
+        if self.cfg.env.teleop_mode and not self.teleop_initialize_targets_on_next_reset:
+            self._cache_teleop_reset_state(env_ids)
         self._prepare_reset_initial_arm_pose(env_ids)
         # update curriculum
         if self.cfg.terrain.curriculum:
@@ -379,16 +381,34 @@ class ManipLoco(LeggedRobot):
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.arm_reward_scales = class_to_dict(self.cfg.rewards.arm_scales)
-        lin_vel_x_min = resolve_schedule_value(self.cfg.commands.lin_vel_x_min_schedule, counter=0.0)
-        lin_vel_x_max = resolve_schedule_value(self.cfg.commands.lin_vel_x_max_schedule, counter=0.0)
-        ang_vel_yaw_max = resolve_schedule_value(self.cfg.commands.ang_vel_yaw_schedule, counter=0.0)
+        schedule_counter = float(getattr(self.cfg.commands, "curriculum_playback_counter", 0.0) or 0.0)
+        schedule_total_iterations = getattr(self.cfg.commands, "curriculum_playback_total_iterations", None)
+        lin_vel_x_min = resolve_schedule_value(
+            self.cfg.commands.lin_vel_x_min_schedule,
+            counter=schedule_counter,
+            default_end_iter=schedule_total_iterations,
+        )
+        lin_vel_x_max = resolve_schedule_value(
+            self.cfg.commands.lin_vel_x_max_schedule,
+            counter=schedule_counter,
+            default_end_iter=schedule_total_iterations,
+        )
+        ang_vel_yaw_max = resolve_schedule_value(
+            self.cfg.commands.ang_vel_yaw_schedule,
+            counter=schedule_counter,
+            default_end_iter=schedule_total_iterations,
+        )
         self.command_ranges = {
             "lin_vel_x": [lin_vel_x_min, lin_vel_x_max],
             "ang_vel_yaw": [-ang_vel_yaw_max, ang_vel_yaw_max],
         }
         self.goal_ee_ranges = class_to_dict(self.cfg.goal_ee.ranges)
         if not self.cfg.goal_ee.ranges.omnidirectional_pos_y:
-            non_omni_pos_y_max = abs(resolve_schedule_value(self.cfg.commands.non_omni_pos_y_schedule, counter=0.0))
+            non_omni_pos_y_max = abs(resolve_schedule_value(
+                self.cfg.commands.non_omni_pos_y_schedule,
+                counter=schedule_counter,
+                default_end_iter=schedule_total_iterations,
+            ))
             self.goal_ee_ranges["pos_y"] = [-non_omni_pos_y_max, non_omni_pos_y_max]
 
         if self.cfg.terrain.mesh_type not in ['heightfield', 'trimesh']:
@@ -959,6 +979,40 @@ class ManipLoco(LeggedRobot):
         self.teleop_arm_joint_step = 0.05
         self.teleop_arm_joint_pos_targets = self.dof_pos[:, self.arm_dof_start_idx:self.arm_dof_end_idx].clone()
         self.teleop_hold_actual_ee_target = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.teleop_initialize_targets_on_next_reset = True
+        self.teleop_restore_arm_gripper_state_on_reset = bool(
+            getattr(self.cfg.env, "teleop_restore_arm_gripper_state_on_reset", False)
+        )
+        self.teleop_saved_arm_dof_pos = self.teleop_arm_joint_pos_targets.clone()
+        self.teleop_saved_arm_joint_targets = self.teleop_arm_joint_pos_targets.clone()
+        self.teleop_saved_gripper_dof_pos = self.gripper_pos_targets.clone()
+        self.teleop_saved_gripper_pos_targets = self.gripper_pos_targets.clone()
+        self.teleop_key_repeat_delay_s = max(0.0, float(getattr(self.cfg.env, "teleop_key_repeat_delay_s", 0.35)))
+        self.teleop_key_repeat_rate_hz = max(0.0, float(getattr(self.cfg.env, "teleop_key_repeat_rate_hz", 6.0)))
+        self.teleop_key_repeat_period_s = (
+            1.0 / self.teleop_key_repeat_rate_hz if self.teleop_key_repeat_rate_hz > 0.0 else float("inf")
+        )
+        self.teleop_repeatable_actions = {
+            "forward",
+            "reverse",
+            "turn_left",
+            "turn_right",
+            "increase_eef_goal_l",
+            "decrease_eef_goal_l",
+            "increase_eef_goal_p",
+            "decrease_eef_goal_p",
+            "increase_eef_goal_y",
+            "decrease_eef_goal_y",
+            "increase_eef_goal_dr",
+            "decrease_eef_goal_dr",
+            "increse_eef_goal_dp",
+            "decrease_eef_goal_dp",
+            "increase_eef_goal_dy",
+            "decrease_eef_goal_dy",
+            "open_gripper",
+            "close_gripper",
+        }
+        self.teleop_held_actions = {}
         self.arm_waist_idx = self.dof_names.index("z1_waist")
         self.omnidirectional_init_pos_y_limits = torch.tensor(
             self.cfg.goal_ee.ranges.omnidirectional_init_pos_y,
@@ -1024,11 +1078,28 @@ class ManipLoco(LeggedRobot):
             self.dof_pos[env_ids, self.arm_waist_idx] = self.reset_init_arm_waist_yaw[env_ids]
         self.dof_vel[env_ids] = 0.
         self.gripper_pos_targets[env_ids] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
-        self.teleop_arm_joint_pos_targets[env_ids] = self.dof_pos[env_ids, self.arm_dof_start_idx:self.arm_dof_end_idx]
-        self.teleop_hold_actual_ee_target[env_ids] = False
+        if self.cfg.env.teleop_mode and not self.teleop_initialize_targets_on_next_reset:
+            arm_slice = slice(self.arm_dof_start_idx, self.arm_dof_end_idx)
+            gripper_slice = slice(self.num_dofs - self.cfg.env.num_gripper_joints, self.num_dofs)
+            if self.teleop_restore_arm_gripper_state_on_reset:
+                self.dof_pos[env_ids, arm_slice] = self.teleop_saved_arm_dof_pos[env_ids]
+                self.dof_pos[env_ids, gripper_slice] = self.teleop_saved_gripper_dof_pos[env_ids]
+            self.teleop_arm_joint_pos_targets[env_ids] = self.teleop_saved_arm_joint_targets[env_ids]
+            self.gripper_pos_targets[env_ids] = self.teleop_saved_gripper_pos_targets[env_ids]
+        else:
+            self.teleop_arm_joint_pos_targets[env_ids] = self.dof_pos[env_ids, self.arm_dof_start_idx:self.arm_dof_end_idx]
+            self.teleop_hold_actual_ee_target[env_ids] = False
 
         self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
         self.gym.refresh_rigid_body_state_tensor(self.sim)
+
+    def _cache_teleop_reset_state(self, env_ids):
+        arm_slice = slice(self.arm_dof_start_idx, self.arm_dof_end_idx)
+        gripper_slice = slice(self.num_dofs - self.cfg.env.num_gripper_joints, self.num_dofs)
+        self.teleop_saved_arm_dof_pos[env_ids] = self.dof_pos[env_ids, arm_slice]
+        self.teleop_saved_arm_joint_targets[env_ids] = self.teleop_arm_joint_pos_targets[env_ids]
+        self.teleop_saved_gripper_dof_pos[env_ids] = self.dof_pos[env_ids, gripper_slice]
+        self.teleop_saved_gripper_pos_targets[env_ids] = self.gripper_pos_targets[env_ids]
 
     def _prepare_reset_initial_arm_pose(self, env_ids):
         self.reset_init_ee_sphere[env_ids] = self.init_start_ee_sphere.repeat(len(env_ids), 1)
@@ -1602,7 +1673,9 @@ class ManipLoco(LeggedRobot):
 
     def _resample_ee_goal(self, env_ids, is_init=False):
         if self.cfg.env.teleop_mode and is_init:
-            self._reset_teleop_ee_goal_to_default()
+            if self.teleop_initialize_targets_on_next_reset:
+                self._reset_teleop_ee_goal_to_default()
+                self.teleop_initialize_targets_on_next_reset = False
             return
         elif self.cfg.env.teleop_mode:
             return
@@ -1818,63 +1891,90 @@ class ManipLoco(LeggedRobot):
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "set_height_reference_invariant")
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_T, "set_height_reference_follow")
 
-    def handle_viewer_action_event(self, evt):
-        super().handle_viewer_action_event(evt)
-
-        if evt.value <= 0:
+    def _update_teleop_held_action_state(self, action, value):
+        if action not in self.teleop_repeatable_actions:
             return
-        if evt.action == "stop_linear":
+
+        if value <= 0:
+            self.teleop_held_actions.pop(action, None)
+            return
+
+        now = time.monotonic()
+        state = self.teleop_held_actions.get(action)
+        if state is None:
+            self.teleop_held_actions[action] = {
+                "press_time": now,
+                "next_repeat_time": now + self.teleop_key_repeat_delay_s,
+            }
+
+    def _apply_held_teleop_actions(self):
+        if not self.cfg.env.teleop_mode or not self.teleop_held_actions or self.teleop_key_repeat_rate_hz <= 0.0:
+            return
+
+        now = time.monotonic()
+        for action, state in list(self.teleop_held_actions.items()):
+            if now < state["next_repeat_time"]:
+                continue
+            self._apply_teleop_action(action)
+            state["next_repeat_time"] = now + self.teleop_key_repeat_period_s
+
+    def on_viewer_events_processed(self):
+        super().on_viewer_events_processed()
+        self._apply_held_teleop_actions()
+
+    def _apply_teleop_action(self, action):
+        if action == "stop_linear":
             self.teleop_raw_commands[:, 0] = 0
-        elif evt.action == "forward":
+        elif action == "forward":
             self.teleop_raw_commands[:, 0] += 0.05
-        elif evt.action == "reverse":
+        elif action == "reverse":
             self.teleop_raw_commands[:, 0] -= 0.05
 
-        if evt.action == "stop_angular":
+        if action == "stop_angular":
             self.teleop_raw_commands[:, 2] = 0
-        if evt.action == "turn_left":
+        elif action == "turn_left":
             self.teleop_raw_commands[:, 2] += 0.05
-        elif evt.action == "turn_right":
+        elif action == "turn_right":
             self.teleop_raw_commands[:, 2] -= 0.05
 
-        if evt.action == "toggle_arm_control_mode":
+        if action == "toggle_arm_control_mode":
             self._toggle_teleop_arm_control_mode()
 
         self._update_effective_teleop_inputs()
 
         if self.teleop_arm_control_mode == "joint":
             joint_delta = self.teleop_arm_joint_step
-            if evt.action == "increase_eef_goal_l":
+            if action == "increase_eef_goal_l":
                 self.teleop_arm_joint_pos_targets[:, 0] += joint_delta
-            elif evt.action == "decrease_eef_goal_l":
+            elif action == "decrease_eef_goal_l":
                 self.teleop_arm_joint_pos_targets[:, 0] -= joint_delta
 
-            if evt.action == "increase_eef_goal_p":
+            if action == "increase_eef_goal_p":
                 self.teleop_arm_joint_pos_targets[:, 1] += joint_delta
-            elif evt.action == "decrease_eef_goal_p":
+            elif action == "decrease_eef_goal_p":
                 self.teleop_arm_joint_pos_targets[:, 1] -= joint_delta
 
-            if evt.action == "increase_eef_goal_y":
+            if action == "increase_eef_goal_y":
                 self.teleop_arm_joint_pos_targets[:, 2] += joint_delta
-            elif evt.action == "decrease_eef_goal_y":
+            elif action == "decrease_eef_goal_y":
                 self.teleop_arm_joint_pos_targets[:, 2] -= joint_delta
 
-            if evt.action == "increase_eef_goal_dr":
+            if action == "increase_eef_goal_dr":
                 self.teleop_arm_joint_pos_targets[:, 3] += joint_delta
-            elif evt.action == "decrease_eef_goal_dr":
+            elif action == "decrease_eef_goal_dr":
                 self.teleop_arm_joint_pos_targets[:, 3] -= joint_delta
 
-            if evt.action == "increse_eef_goal_dp":
+            if action == "increse_eef_goal_dp":
                 self.teleop_arm_joint_pos_targets[:, 4] += joint_delta
-            elif evt.action == "decrease_eef_goal_dp":
+            elif action == "decrease_eef_goal_dp":
                 self.teleop_arm_joint_pos_targets[:, 4] -= joint_delta
 
-            if evt.action == "increase_eef_goal_dy":
+            if action == "increase_eef_goal_dy":
                 self.teleop_arm_joint_pos_targets[:, 5] += joint_delta
-            elif evt.action == "decrease_eef_goal_dy":
+            elif action == "decrease_eef_goal_dy":
                 self.teleop_arm_joint_pos_targets[:, 5] -= joint_delta
 
-            if evt.action == "reset_eef_goal_pose":
+            if action == "reset_eef_goal_pose":
                 self.teleop_arm_joint_pos_targets[:] = self.default_dof_pos[self.arm_dof_start_idx:self.arm_dof_end_idx]
                 print("[teleop] reset arm joint targets to default")
 
@@ -1885,7 +1985,7 @@ class ManipLoco(LeggedRobot):
                 arm_limits[:, 1],
             )
         else:
-            if evt.action in {
+            if action in {
                 "increase_eef_goal_l",
                 "decrease_eef_goal_l",
                 "increase_eef_goal_p",
@@ -1901,44 +2001,44 @@ class ManipLoco(LeggedRobot):
             }:
                 self.teleop_hold_actual_ee_target[:] = False
 
-            if evt.action == "increase_eef_goal_l":
+            if action == "increase_eef_goal_l":
                 self.teleop_raw_ee_goal_cart[:, 0] += 0.05
-            elif evt.action == "decrease_eef_goal_l":
+            elif action == "decrease_eef_goal_l":
                 self.teleop_raw_ee_goal_cart[:, 0] -= 0.05
 
-            if evt.action == "increase_eef_goal_p":
+            if action == "increase_eef_goal_p":
                 self.teleop_raw_ee_goal_cart[:, 1] += 0.05
-            elif evt.action == "decrease_eef_goal_p":
+            elif action == "decrease_eef_goal_p":
                 self.teleop_raw_ee_goal_cart[:, 1] -= 0.05
 
-            if evt.action == "increase_eef_goal_y":
+            if action == "increase_eef_goal_y":
                 self.teleop_raw_ee_goal_cart[:, 2] += 0.05
-            elif evt.action == "decrease_eef_goal_y":
+            elif action == "decrease_eef_goal_y":
                 self.teleop_raw_ee_goal_cart[:, 2] -= 0.05
             
-            if evt.action == "increase_eef_goal_dr":
+            if action == "increase_eef_goal_dr":
                 self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] += 0.05
-            elif evt.action == "decrease_eef_goal_dr":
+            elif action == "decrease_eef_goal_dr":
                 self.teleop_raw_ee_goal_orn_delta_rpy[:, 0] -= 0.05
 
-            if evt.action == "increse_eef_goal_dp":
+            if action == "increse_eef_goal_dp":
                 self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] += 0.05
-            elif evt.action == "decrease_eef_goal_dp":
+            elif action == "decrease_eef_goal_dp":
                 self.teleop_raw_ee_goal_orn_delta_rpy[:, 1] -= 0.05
             
-            if evt.action == "increase_eef_goal_dy":
+            if action == "increase_eef_goal_dy":
                 self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] += 0.05
-            elif evt.action == "decrease_eef_goal_dy":
+            elif action == "decrease_eef_goal_dy":
                 self.teleop_raw_ee_goal_orn_delta_rpy[:, 2] -= 0.05
 
-        if evt.action == "reset_eef_goal_pose":
+        if action == "reset_eef_goal_pose":
             if self.teleop_arm_control_mode == "ee":
                 self._reset_teleop_ee_goal_to_default()
                 print("[teleop] reset end-effector goal pose to default")
 
-        if evt.action == "open_gripper":
+        if action == "open_gripper":
             self.gripper_pos_targets += 0.05
-        elif evt.action == "close_gripper":
+        elif action == "close_gripper":
             self.gripper_pos_targets -= 0.05
 
         self.gripper_pos_targets = torch.clip(
@@ -1950,11 +2050,19 @@ class ManipLoco(LeggedRobot):
         self._update_effective_teleop_inputs()
 
         if self.cfg.goal_ee.sphere_center.mixed_height_reference:
-            if evt.action == "set_height_reference_invariant":
+            if action == "set_height_reference_invariant":
                 self.goal_height_follow_override = False
                 self.goal_height_follow_mask[:] = False
                 print("[teleop] height reference mode: z-invariant (obs bit = 0)")
-            elif evt.action == "set_height_reference_follow":
+            elif action == "set_height_reference_follow":
                 self.goal_height_follow_override = True
                 self.goal_height_follow_mask[:] = True
                 print("[teleop] height reference mode: trunk-follow (obs bit = 1)")
+
+    def handle_viewer_action_event(self, evt):
+        super().handle_viewer_action_event(evt)
+        self._update_teleop_held_action_state(evt.action, evt.value)
+
+        if evt.value <= 0:
+            return
+        self._apply_teleop_action(evt.action)

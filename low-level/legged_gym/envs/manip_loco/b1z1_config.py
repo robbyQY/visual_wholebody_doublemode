@@ -139,6 +139,9 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         teleop_ee_goal_x_limit = [-0.5, 1.0]
         teleop_ee_goal_y_limit = [-0.7, 0.7]
         teleop_ee_goal_z_limit = [-0.6, 0.6]
+        teleop_restore_arm_gripper_state_on_reset = False
+        teleop_key_repeat_delay_s = 0.35
+        teleop_key_repeat_rate_hz = 6.0
         record_video = False
         stand_by = False
         observe_gait_commands = False
