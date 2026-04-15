@@ -299,6 +299,15 @@ class ManipLoco(LeggedRobot):
         p_term = torch.abs(p) > 0.8
         z_term = z < 0.1
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
+        if self.is_main_process:
+            if r_term:
+                print("Terminated due to roll angle. Roll: ", r)
+            elif p_term:
+                print("Terminated due to pitch angle. Pitch: ", p)
+            elif z_term:
+                print("Terminated due to height. Height: ", z)
+            elif termination_contact_buf:
+                print("Terminated due to contact forces. Contact forces: ", self.contact_forces[:, self.termination_contact_indices, :])
 
         # arm_base_local = torch.tensor([0.3, 0.0, 0.09], device=self.device).repeat(self.num_envs, 1)
         # arm_base = quat_apply(self.base_quat, arm_base_local) + self.root_states[:, :3]
@@ -1072,10 +1081,9 @@ class ManipLoco(LeggedRobot):
             env_ids (List[int]): Environemnt ids
         """
         self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(0.8, 1.2, (len(env_ids), self.num_dofs), device=self.device)
-        if self.omnidirectional_pos_y:
-            arm_slice = slice(self.arm_dof_start_idx, self.arm_dof_end_idx)
-            self.dof_pos[env_ids, arm_slice] = self.default_dof_pos[arm_slice]
-            self.dof_pos[env_ids, self.arm_waist_idx] = self.reset_init_arm_waist_yaw[env_ids]
+        arm_waist_pos = self.reset_init_arm_waist_yaw[env_ids] + torch_rand_float(-0.2, 0.2, (len(env_ids), 1), device=self.device).squeeze(-1)
+        self.dof_pos[env_ids, self.arm_waist_idx] = torch.clamp(
+            arm_waist_pos, min=self.dof_pos_limits[self.arm_waist_idx, 0], max=self.dof_pos_limits[self.arm_waist_idx, 1])
         self.dof_vel[env_ids] = 0.
         self.gripper_pos_targets[env_ids] = self.default_dof_pos[-self.cfg.env.num_gripper_joints:]
         if self.cfg.env.teleop_mode and not self.teleop_initialize_targets_on_next_reset:
@@ -1104,22 +1112,18 @@ class ManipLoco(LeggedRobot):
     def _prepare_reset_initial_arm_pose(self, env_ids):
         self.reset_init_ee_sphere[env_ids] = self.init_start_ee_sphere.repeat(len(env_ids), 1)
         self.reset_init_ee_sphere[env_ids, 2] = wrap_to_pi(self.reset_init_ee_sphere[env_ids, 2] + self.arm_mount_yaw_offset)
-        if not self.omnidirectional_pos_y:
+        if self.cfg.env.teleop_mode:
             return
-
-        sampled_yaw = self._sample_omnidirectional_reset_yaw(env_ids)
+        if self.omnidirectional_pos_y:
+            yaw_min = float(self.arm_waist_reset_limits[0].item())
+            yaw_max = float(self.arm_waist_reset_limits[1].item())
+        else:
+            yaw_min = self.goal_ee_ranges["pos_y"][0]
+            yaw_max = self.goal_ee_ranges["pos_y"][1]
+        sampled_yaw = torch_rand_float(yaw_min, yaw_max, (len(env_ids), 1), device=self.device).squeeze(1)
         self.reset_init_arm_waist_yaw[env_ids] = sampled_yaw
         self.reset_init_ee_sphere[env_ids, 2] = wrap_to_pi(sampled_yaw + self.arm_mount_yaw_offset)
 
-    def _sample_omnidirectional_reset_yaw(self, env_ids):
-        yaw_min = float(self.arm_waist_reset_limits[0].item())
-        yaw_max = float(self.arm_waist_reset_limits[1].item())
-        if yaw_min > yaw_max:
-            yaw_mid = 0.5 * (yaw_min + yaw_max)
-            yaw_min = yaw_mid
-            yaw_max = yaw_mid
-        return torch_rand_float(yaw_min, yaw_max, (len(env_ids), 1), device=self.device).squeeze(1)
-        
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
 
@@ -1576,19 +1580,6 @@ class ManipLoco(LeggedRobot):
         
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
     
-    def _resample_ee_goal_sphere_once(self, env_ids):
-        goal_yaw = self._sample_ee_goal_yaw(env_ids, self.ee_start_sphere[env_ids, 2])
-        self.ee_goal_sphere[env_ids, 2] = goal_yaw
-
-        if self.omnidirectional_pos_y:
-            pos_l_min, pos_l_max, pos_p_min, pos_p_max = self._get_omnidirectional_goal_sampling_bounds(goal_yaw)
-            self.ee_goal_sphere[env_ids, 0] = pos_l_min + (pos_l_max - pos_l_min) * torch.rand(len(env_ids), device=self.device)
-            self.ee_goal_sphere[env_ids, 1] = pos_p_min + (pos_p_max - pos_p_min) * torch.rand(len(env_ids), device=self.device)
-            return
-
-        self.ee_goal_sphere[env_ids, 0] = torch_rand_float(self.goal_ee_ranges["pos_l"][0], self.goal_ee_ranges["pos_l"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-        self.ee_goal_sphere[env_ids, 1] = torch_rand_float(self.goal_ee_ranges["pos_p"][0], self.goal_ee_ranges["pos_p"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-
     def _get_omnidirectional_goal_sampling_bounds(self, goal_yaw):
         rear_weight = self._get_omnidirectional_rear_weight(goal_yaw)
 
@@ -1617,9 +1608,6 @@ class ManipLoco(LeggedRobot):
 
     def _interpolate_goal_sphere(self, start_sphere, goal_sphere, t):
         interp_sphere = torch.lerp(start_sphere, goal_sphere, t)
-        if self.omnidirectional_pos_y:
-            return interp_sphere
-
         yaw_t = t[..., 0] if t.ndim > 0 and t.shape[-1] == 1 else t
         start_yaw_arm_front = wrap_to_pi(start_sphere[..., 2] - self.arm_mount_yaw_offset)
         goal_yaw_arm_front = wrap_to_pi(goal_sphere[..., 2] - self.arm_mount_yaw_offset)
@@ -1627,33 +1615,6 @@ class ManipLoco(LeggedRobot):
             torch.lerp(start_yaw_arm_front, goal_yaw_arm_front, yaw_t) + self.arm_mount_yaw_offset
         )
         return interp_sphere
-
-    def _sample_ee_goal_yaw(self, env_ids, reference_yaw=None):
-        if not self.omnidirectional_pos_y:
-            sampled_yaw = torch_rand_float(
-                self.goal_ee_ranges["pos_y"][0],
-                self.goal_ee_ranges["pos_y"][1],
-                (len(env_ids), 1),
-                device=self.device
-            ).squeeze(1)
-            return wrap_to_pi(sampled_yaw + self.arm_mount_yaw_offset)
-
-        if reference_yaw is None:
-            return torch_rand_float(-np.pi, np.pi, (len(env_ids), 1), device=self.device).squeeze(1)
-
-        yaw_delta = torch_rand_float(
-            self.goal_ee_ranges["pos_y"][0],
-            self.goal_ee_ranges["pos_y"][1],
-            (len(env_ids), 1),
-            device=self.device
-        ).squeeze(1)
-        return torch.clamp(reference_yaw + yaw_delta, min=-np.pi, max=np.pi)
-    
-    def _resample_ee_goal_orn_once(self, env_ids):
-        ee_goal_delta_orn_r = torch_rand_float(self.goal_ee_ranges["delta_orn_r"][0], self.goal_ee_ranges["delta_orn_r"][1], (len(env_ids), 1), device=self.device)
-        ee_goal_delta_orn_p = torch_rand_float(self.goal_ee_ranges["delta_orn_p"][0], self.goal_ee_ranges["delta_orn_p"][1], (len(env_ids), 1), device=self.device)
-        ee_goal_delta_orn_y = torch_rand_float(self.goal_ee_ranges["delta_orn_y"][0], self.goal_ee_ranges["delta_orn_y"][1], (len(env_ids), 1), device=self.device)
-        self.ee_goal_orn_delta_rpy[env_ids, :] = torch.cat([ee_goal_delta_orn_r, ee_goal_delta_orn_p, ee_goal_delta_orn_y], dim=-1)
 
     def _resample_goal_height_reference(self, env_ids, is_init=False):
         if not self.cfg.goal_ee.sphere_center.mixed_height_reference or len(env_ids) == 0:
@@ -1685,26 +1646,40 @@ class ManipLoco(LeggedRobot):
             
             if is_init:
                 self.ee_goal_orn_delta_rpy[env_ids, :] = 0
-                init_start_sphere = self.reset_init_ee_sphere[env_ids].clone()
-                if not self.omnidirectional_pos_y:
-                    init_start_sphere[:, 2] = self._sample_ee_goal_yaw(env_ids)
-                init_goal_sphere = self.init_end_ee_sphere.repeat(len(env_ids), 1)
-                init_goal_sphere[:, 2] = self._sample_ee_goal_yaw(env_ids, init_start_sphere[:, 2])
-
-                self.ee_start_sphere[env_ids] = init_start_sphere
-                self.ee_goal_sphere[env_ids] = init_goal_sphere
+                self.ee_start_sphere[env_ids] = self.reset_init_ee_sphere[env_ids].clone()
             else:
                 self._resample_ee_goal_orn_once(env_ids)
                 self.ee_start_sphere[env_ids] = self.ee_goal_sphere[env_ids].clone()
-                for i in range(10):
-                    self._resample_ee_goal_sphere_once(env_ids)
-                    collision_mask = self._collision_check(env_ids)
-                    env_ids = env_ids[collision_mask]
-                    if len(env_ids) == 0:
-                        break
+            for i in range(10):
+                self._resample_ee_goal_sphere_once(env_ids)
+                collision_mask = self._collision_check(env_ids)
+                env_ids = env_ids[collision_mask]
+                if len(env_ids) == 0:
+                    break
             self.ee_goal_cart[init_env_ids, :] = sphere2cart(self.ee_goal_sphere[init_env_ids, :])
             self.goal_timer[init_env_ids] = 0.0
 
+    def _resample_ee_goal_orn_once(self, env_ids):
+        ee_goal_delta_orn_r = torch_rand_float(self.goal_ee_ranges["delta_orn_r"][0], self.goal_ee_ranges["delta_orn_r"][1], (len(env_ids), 1), device=self.device)
+        ee_goal_delta_orn_p = torch_rand_float(self.goal_ee_ranges["delta_orn_p"][0], self.goal_ee_ranges["delta_orn_p"][1], (len(env_ids), 1), device=self.device)
+        ee_goal_delta_orn_y = torch_rand_float(self.goal_ee_ranges["delta_orn_y"][0], self.goal_ee_ranges["delta_orn_y"][1], (len(env_ids), 1), device=self.device)
+        self.ee_goal_orn_delta_rpy[env_ids, :] = torch.cat([ee_goal_delta_orn_r, ee_goal_delta_orn_p, ee_goal_delta_orn_y], dim=-1)
+
+    def _resample_ee_goal_sphere_once(self, env_ids):
+        sampled_yaw = torch_rand_float(self.goal_ee_ranges["pos_y"][0], self.goal_ee_ranges["pos_y"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        if self.omnidirectional_pos_y:
+            start_yaw = wrap_to_pi(self.ee_start_sphere[env_ids, 2] - self.arm_mount_yaw_offset)
+            goal_yaw = torch.clamp(sampled_yaw + start_yaw, min=-np.pi, max=np.pi)
+            self.ee_goal_sphere[env_ids, 2] = wrap_to_pi(goal_yaw + self.arm_mount_yaw_offset)
+            pos_l_min, pos_l_max, pos_p_min, pos_p_max = self._get_omnidirectional_goal_sampling_bounds(goal_yaw)
+            self.ee_goal_sphere[env_ids, 0] = pos_l_min + (pos_l_max - pos_l_min) * torch.rand(len(env_ids), device=self.device)
+            self.ee_goal_sphere[env_ids, 1] = pos_p_min + (pos_p_max - pos_p_min) * torch.rand(len(env_ids), device=self.device)
+            return
+
+        self.ee_goal_sphere[env_ids, 2] = wrap_to_pi(sampled_yaw + self.arm_mount_yaw_offset)
+        self.ee_goal_sphere[env_ids, 0] = torch_rand_float(self.goal_ee_ranges["pos_l"][0], self.goal_ee_ranges["pos_l"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        self.ee_goal_sphere[env_ids, 1] = torch_rand_float(self.goal_ee_ranges["pos_p"][0], self.goal_ee_ranges["pos_p"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+    
     def _collision_check(self, env_ids):
         """Rejects EE trajectories that enter the forbidden box in goal local coordinates.
 
