@@ -49,6 +49,7 @@ CHECKPOINT_FEATURE_NAMES = (
     "mixed_height_reference",
     "omnidirectional_pos_y",
     "ee_goal_obs_mode",
+    "reward_scale_preset",
     "gait_frequency_min",
     "gait_frequency_max",
     "gait_frequency_lin_vel_ref",
@@ -143,6 +144,8 @@ def _normalize_checkpoint_feature_value(feature_name, value):
         return bool(value)
     if feature_name == "ee_goal_obs_mode":
         return str(value)
+    if feature_name == "reward_scale_preset":
+        return str(value)
     if feature_name in FLOAT_CHECKPOINT_FEATURES:
         return float(value)
     if feature_name == "mount_deg":
@@ -160,6 +163,7 @@ def _extract_checkpoint_features(args, env_cfg):
         "mixed_height_reference": bool(env_cfg.goal_ee.sphere_center.mixed_height_reference),
         "omnidirectional_pos_y": bool(env_cfg.goal_ee.ranges.omnidirectional_pos_y),
         "ee_goal_obs_mode": str(env_cfg.env.ee_goal_obs_mode),
+        "reward_scale_preset": str(env_cfg.rewards.reward_scale_preset),
         "gait_frequency_min": float(env_cfg.env.gait_frequency_min),
         "gait_frequency_max": float(env_cfg.env.gait_frequency_max),
         "gait_frequency_lin_vel_ref": float(env_cfg.env.gait_frequency_lin_vel_ref),
@@ -289,6 +293,18 @@ def _parse_float_from_train_log(log_path, key):
                 value = float(match.group(1))
     return value
 
+def _parse_string_from_train_log(log_path, key):
+    if not os.path.isfile(log_path):
+        return None
+    pattern = re.compile(rf"{re.escape(key)}=([A-Za-z0-9_\-]+)")
+    value = None
+    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                value = match.group(1)
+    return value
+
 def load_run_metadata(log_dir, filename=None):
     preferred_path = get_run_metadata_path(log_dir, filename=filename)
     metadata_candidates = []
@@ -315,20 +331,14 @@ def load_run_metadata(log_dir, filename=None):
     observe_gait_commands = _parse_bool_from_train_log(train_log_path, "OBSERVE_GAIT_COMMANDS")
     mixed_height_reference = _parse_bool_from_train_log(train_log_path, "MIXED_HEIGHT_REFERENCE")
     omnidirectional_pos_y = _parse_bool_from_train_log(train_log_path, "OMNIDIRECTIONAL_POS_Y")
+    reward_scale_preset = _parse_string_from_train_log(train_log_path, "REWARD_SCALE_PRESET")
     gait_frequency_min = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MIN")
     gait_frequency_max = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MAX")
     gait_frequency_lin_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_LIN_VEL_REF")
     gait_frequency_ang_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_REF")
     gait_frequency_ang_vel_weight = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_WEIGHT")
     mount_deg = _parse_float_from_train_log(train_log_path, "MOUNT_DEG")
-    ee_goal_obs_mode = None
-    if os.path.isfile(train_log_path):
-        pattern = re.compile(r"EE_GOAL_OBS_MODE=([A-Za-z0-9_\-]+)")
-        with open(train_log_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                match = pattern.search(line)
-                if match:
-                    ee_goal_obs_mode = match.group(1)
+    ee_goal_obs_mode = _parse_string_from_train_log(train_log_path, "EE_GOAL_OBS_MODE")
     if observe_gait_commands is not None:
         checkpoint_features["observe_gait_commands"] = observe_gait_commands
     if mixed_height_reference is not None:
@@ -337,6 +347,8 @@ def load_run_metadata(log_dir, filename=None):
         checkpoint_features["omnidirectional_pos_y"] = omnidirectional_pos_y
     if ee_goal_obs_mode is not None:
         checkpoint_features["ee_goal_obs_mode"] = ee_goal_obs_mode
+    if reward_scale_preset is not None:
+        checkpoint_features["reward_scale_preset"] = reward_scale_preset
     if gait_frequency_min is not None:
         checkpoint_features["gait_frequency_min"] = gait_frequency_min
     if gait_frequency_max is not None:
@@ -541,6 +553,13 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.action_delay_mode = args.action_delay_mode
         if args.ee_goal_obs_mode is not None:
             env_cfg.env.ee_goal_obs_mode = args.ee_goal_obs_mode
+        if args.reward_scale_preset is not None:
+            selected_reward_scale_preset = getattr(env_cfg.rewards.scale_presets, args.reward_scale_preset, None)
+            if selected_reward_scale_preset is None:
+                raise ValueError(f"Unsupported rewards.reward_scale_preset={args.reward_scale_preset}")
+            env_cfg.rewards.reward_scale_preset = args.reward_scale_preset
+            for reward_name, reward_scale in selected_reward_scale_preset.items():
+                setattr(env_cfg.rewards.scales, reward_name, reward_scale)
         if args.gait_frequency_min is not None:
             env_cfg.env.gait_frequency_min = args.gait_frequency_min
         if args.gait_frequency_max is not None:
@@ -675,6 +694,7 @@ def get_args(test=False):
         {"name": "--load_exptid", "type": str, "help": "Checkpoint source exptid for load mode. Loads weights only and starts training from iteration 0."},
         {"name": "--train_mode", "type": str, "default": "fresh", "help": "Training mode: fresh, resume, or load."},
         {"name": "--train_log_every", "type": int, "default": 1, "help": "Print training progress every N iterations while keeping wandb logging every iteration."},
+        {"name": "--wandb_group", "type": str, "default": "", "help": "Optional Weights & Biases group name for organizing related runs."},
 
         {"name": "--no-headless", "action": "store_true", "help": "Enable viewer rendering"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
@@ -689,6 +709,7 @@ def get_args(test=False):
         {"name": "--teleop_input_regularization", "action": "store_true", "default": False, "help": "Preprocess teleop raw commands and arm targets before feeding the policy/control stack"},
         {"name": "--action_delay_mode", "type": str, "choices": ["auto", "undelayed", "delayed"], "help": "Action delay mode for play/teleop: auto keeps the training switch, undelayed always uses the latest action, delayed always uses a one-step delayed action."},
         {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
+        {"name": "--reward_scale_preset", "type": str, "choices": ["legacy", "height_flexible"], "help": "Reward scale preset used to populate rewards.scales for training/playback."},
         {"name": "--gait_frequency_min", "type": float, "help": "Minimum gait clock frequency used when gait commands are enabled."},
         {"name": "--gait_frequency_max", "type": float, "help": "Maximum gait clock frequency used when gait commands are enabled."},
         {"name": "--gait_frequency_lin_vel_ref", "type": float, "help": "Linear-velocity reference used to normalize gait-frequency scaling."},

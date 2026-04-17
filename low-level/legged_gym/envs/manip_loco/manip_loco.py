@@ -299,7 +299,7 @@ class ManipLoco(LeggedRobot):
         p_term = torch.abs(p) > 0.8
         z_term = z < 0.1
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
-        if self.is_main_process:
+        if self.num_envs == 1 and self.is_main_process:
             if r_term:
                 print("Terminated due to roll angle. Roll: ", r)
             elif p_term:

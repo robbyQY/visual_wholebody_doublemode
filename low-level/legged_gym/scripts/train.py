@@ -75,6 +75,8 @@ def get_wandb_init_kwargs(args, log_pth, mode):
         "mode": mode,
         "dir": LEGGED_GYM_ENVS_DIR + "/logs",
     }
+    if getattr(args, "wandb_group", ""):
+        init_kwargs["group"] = args.wandb_group
     if mode == "disabled":
         return init_kwargs
 
@@ -228,6 +230,7 @@ def log_training_header(args, log_pth, num_gpus, env_cfg=None):
     print(f"LOAD_EXPTID={getattr(args, 'load_exptid', None) or '<none>'}")
     print(f"LOAD_CKPT={getattr(args, 'checkpoint', '<default>')}")
     print(f"TRAIN_LOG_EVERY={getattr(args, 'train_log_every', 1)}")
+    print(f"WANDB_GROUP={getattr(args, 'wandb_group', '') or '<none>'}")
     print(f"NUM_ENVS={total_num_envs}")
     print(f"NUM_GPUS={num_gpus}")
     print(f"DISTRIBUTED={distributed}")
@@ -241,6 +244,7 @@ def log_training_header(args, log_pth, num_gpus, env_cfg=None):
     if not env_cfg.goal_ee.ranges.omnidirectional_pos_y:
         print(f"NON_OMNI_POS_Y_SCHEDULE={env_cfg.commands.non_omni_pos_y_schedule}")
     print(f"EE_GOAL_OBS_MODE={env_cfg.env.ee_goal_obs_mode}")
+    print(f"REWARD_SCALE_PRESET={env_cfg.rewards.reward_scale_preset}")
     print(f"GAIT_FREQUENCY_MIN={env_cfg.env.gait_frequency_min}")
     print(f"GAIT_FREQUENCY_MAX={env_cfg.env.gait_frequency_max}")
     print(f"GAIT_FREQUENCY_LIN_VEL_REF={env_cfg.env.gait_frequency_lin_vel_ref}")
