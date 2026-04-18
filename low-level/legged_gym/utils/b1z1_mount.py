@@ -22,6 +22,22 @@ MOUNT_URDF_SPECS = {
 }
 
 
+def normalize_mount_xyz(mount_xyz):
+    if len(mount_xyz) != 3:
+        raise ValueError(f"mount_xyz must contain exactly 3 values, got {mount_xyz!r}")
+    return tuple(float(value) for value in mount_xyz)
+
+
+def _format_mount_xyz_token(value):
+    value = float(value)
+    if abs(value) < 1e-12:
+        value = 0.0
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    if text in {"", "-0"}:
+        text = "0"
+    return text.replace("-", "m").replace(".", "p")
+
+
 def _is_relative_resource_path(path):
     return not (
         os.path.isabs(path)
@@ -62,18 +78,24 @@ def _get_mount_urdf_spec(generator_name):
         raise ValueError(f"Unsupported mount_urdf_generator={generator_name!r}. Supported values: {supported}.") from exc
 
 
-def get_generated_mount_urdf_rel_path(generator_name, mount_deg):
+def get_generated_mount_urdf_rel_path(generator_name, mount_deg, mount_xyz):
     mount_deg = normalize_mount_deg(mount_deg)
+    mount_xyz = normalize_mount_xyz(mount_xyz)
     spec = _get_mount_urdf_spec(generator_name)
-    filename = f"{spec['generated_filename_prefix']}_{mount_deg}.urdf"
+    xyz_suffix = "_".join(
+        f"{axis}{_format_mount_xyz_token(value)}"
+        for axis, value in zip(("x", "y", "z"), mount_xyz)
+    )
+    filename = f"{spec['generated_filename_prefix']}_{mount_deg}_{xyz_suffix}.urdf"
     return os.path.join(spec["generated_urdf_dir_rel_path"], filename)
 
 
-def ensure_mount_urdf(root_dir, generator_name, mount_deg):
+def ensure_mount_urdf(root_dir, generator_name, mount_deg, mount_xyz):
     mount_deg = normalize_mount_deg(mount_deg)
+    mount_xyz = normalize_mount_xyz(mount_xyz)
     spec = _get_mount_urdf_spec(generator_name)
     source_path = os.path.join(root_dir, spec["source_urdf_rel_path"])
-    output_rel_path = get_generated_mount_urdf_rel_path(generator_name, mount_deg)
+    output_rel_path = get_generated_mount_urdf_rel_path(generator_name, mount_deg, mount_xyz)
     output_path = os.path.join(root_dir, output_rel_path)
     source_dir = os.path.dirname(source_path)
     output_dir = os.path.dirname(output_path)
@@ -98,9 +120,7 @@ def ensure_mount_urdf(root_dir, generator_name, mount_deg):
 
         if in_base_static_joint and "<origin" in line:
             indent = re.match(r"\s*", line).group(0)
-            numeric_tokens = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", line)
-            xyz_tokens = numeric_tokens[-3:] if len(numeric_tokens) >= 3 else spec["default_xyz"]
-            xyz_string = " ".join(f"{float(token):g}" for token in xyz_tokens)
+            xyz_string = " ".join(f"{value:g}" for value in mount_xyz)
             rewritten_lines.append(f'{indent}<origin rpy="0 0 {yaw_rad:.16g}" xyz="{xyz_string}" />\n')
             replaced_origin = True
             continue
@@ -119,5 +139,7 @@ def ensure_mount_urdf(root_dir, generator_name, mount_deg):
     return output_rel_path
 
 
-def ensure_b1z1_mount_urdf(root_dir, mount_deg):
-    return ensure_mount_urdf(root_dir, "b1z1", mount_deg)
+def ensure_b1z1_mount_urdf(root_dir, mount_deg, mount_xyz=None):
+    if mount_xyz is None:
+        mount_xyz = MOUNT_URDF_SPECS["b1z1"]["default_xyz"]
+    return ensure_mount_urdf(root_dir, "b1z1", mount_deg, mount_xyz)

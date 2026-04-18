@@ -52,6 +52,12 @@ validate_optional_number() {
   run_train_die "${field_name} must be numeric, got: ${raw_value}"
 }
 
+sync_task_dependent_defaults() {
+  if [[ -z "${PROJ_NAME}" ]]; then
+    PROJ_NAME="${TASK}-low"
+  fi
+}
+
 generate_train_exptid() {
   local reward_scale_preset="$1"
   local mixed_height_reference="$2"
@@ -189,6 +195,12 @@ column_aliases = {
     "全向采样": "OMNIDIRECTIONAL_POS_Y",
     "MOUNT_DEG": "MOUNT_DEG",
     "mount_deg": "MOUNT_DEG",
+    "MOUNT_X": "MOUNT_X",
+    "mount_x": "MOUNT_X",
+    "MOUNT_Y": "MOUNT_Y",
+    "mount_y": "MOUNT_Y",
+    "MOUNT_Z": "MOUNT_Z",
+    "mount_z": "MOUNT_Z",
     "机械臂角度": "MOUNT_DEG",
     "ENABLE_DYNAMIC_GAIT_FREQUENCY": "ENABLE_DYNAMIC_GAIT_FREQUENCY",
     "enable_dynamic_gait_frequency": "ENABLE_DYNAMIC_GAIT_FREQUENCY",
@@ -242,6 +254,8 @@ PY
 }
 
 normalize_current_train_config() {
+  sync_task_dependent_defaults
+
   OBSERVE_GAIT_COMMANDS="$(normalize_bool_value "${OBSERVE_GAIT_COMMANDS}")" || run_train_die "OBSERVE_GAIT_COMMANDS must be a boolean"
   MIXED_HEIGHT_REFERENCE="$(normalize_bool_value "${MIXED_HEIGHT_REFERENCE}")" || run_train_die "MIXED_HEIGHT_REFERENCE must be a boolean"
   OMNIDIRECTIONAL_POS_Y="$(normalize_bool_value "${OMNIDIRECTIONAL_POS_Y}")" || run_train_die "OMNIDIRECTIONAL_POS_Y must be a boolean"
@@ -294,6 +308,9 @@ normalize_current_train_config() {
   validate_optional_number "${TRUNK_FOLLOW_RATIO}" "TRUNK_FOLLOW_RATIO"
   validate_optional_number "${MAX_ITERATIONS}" "MAX_ITERATIONS"
   validate_optional_number "${NUM_ENVS}" "NUM_ENVS"
+  validate_optional_number "${MOUNT_X}" "MOUNT_X"
+  validate_optional_number "${MOUNT_Y}" "MOUNT_Y"
+  validate_optional_number "${MOUNT_Z}" "MOUNT_Z"
 
   if [[ "${TRAIN_MODE}" == "load" && -z "${LOAD_EXPTID}" ]]; then
     run_train_die "LOAD_EXPTID must be set when TRAIN_MODE=load"
@@ -370,6 +387,15 @@ build_train_args() {
   fi
   if [[ -n "${MAX_ITERATIONS}" ]]; then
     TRAIN_ARGS+=(--max_iterations "${MAX_ITERATIONS}")
+  fi
+  if [[ -n "${MOUNT_X}" ]]; then
+    TRAIN_ARGS+=(--mount_x "${MOUNT_X}")
+  fi
+  if [[ -n "${MOUNT_Y}" ]]; then
+    TRAIN_ARGS+=(--mount_y "${MOUNT_Y}")
+  fi
+  if [[ -n "${MOUNT_Z}" ]]; then
+    TRAIN_ARGS+=(--mount_z "${MOUNT_Z}")
   fi
 }
 
@@ -626,6 +652,9 @@ write_job_metadata_file() {
     printf 'TRUNK_FOLLOW_RATIO=%q\n' "${TRUNK_FOLLOW_RATIO}"
     printf 'OMNIDIRECTIONAL_POS_Y=%q\n' "${OMNIDIRECTIONAL_POS_Y}"
     printf 'MOUNT_DEG=%q\n' "${MOUNT_DEG}"
+    printf 'MOUNT_X=%q\n' "${MOUNT_X}"
+    printf 'MOUNT_Y=%q\n' "${MOUNT_Y}"
+    printf 'MOUNT_Z=%q\n' "${MOUNT_Z}"
     printf 'ENABLE_DYNAMIC_GAIT_FREQUENCY=%q\n' "${ENABLE_DYNAMIC_GAIT_FREQUENCY}"
     write_array_declaration TRAIN_ARGS "${TRAIN_ARGS[@]}"
   } > "${metadata_file}"
@@ -635,8 +664,10 @@ enqueue_training_job() {
   prepare_training_submission
 
   RUN_INSTANCE_ID="$(date +%Y%m%d_%H%M%S)_$$"
-  ERROR_LOG="${SH_DIR}/error_${RUN_INSTANCE_ID}.log"
-  QUEUE_LOG="${SH_DIR}/queue_${RUN_INSTANCE_ID}.log"
+  local script_log_dir="${ROOT_DIR}/logs"
+  mkdir -p "${script_log_dir}"
+  ERROR_LOG="${script_log_dir}/error_${RUN_INSTANCE_ID}.log"
+  QUEUE_LOG="${script_log_dir}/queue_${RUN_INSTANCE_ID}.log"
 
   mkdir -p "${QUEUE_JOBS_DIR}"
 

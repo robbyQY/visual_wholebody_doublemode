@@ -41,7 +41,7 @@ from isaacgym import gymapi
 from isaacgym import gymutil
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
-from .b1z1_mount import ensure_mount_urdf, mount_deg_to_rad, normalize_mount_deg
+from .b1z1_mount import ensure_mount_urdf, mount_deg_to_rad, normalize_mount_deg, normalize_mount_xyz
 
 RUN_METADATA_FILENAME = "run_metadata.json"
 CHECKPOINT_FEATURE_NAMES = (
@@ -56,6 +56,9 @@ CHECKPOINT_FEATURE_NAMES = (
     "gait_frequency_ang_vel_ref",
     "gait_frequency_ang_vel_weight",
     "mount_deg",
+    "mount_x",
+    "mount_y",
+    "mount_z",
 )
 BOOL_CHECKPOINT_FEATURES = {
     "observe_gait_commands",
@@ -68,6 +71,9 @@ FLOAT_CHECKPOINT_FEATURES = {
     "gait_frequency_lin_vel_ref",
     "gait_frequency_ang_vel_ref",
     "gait_frequency_ang_vel_weight",
+    "mount_x",
+    "mount_y",
+    "mount_z",
 }
 PLAYBACK_CURRICULUM_SCHEDULE_NAMES = (
     "lin_vel_x_min_schedule",
@@ -172,7 +178,11 @@ def _extract_checkpoint_features(args, env_cfg):
     }
     if hasattr(env_cfg, "goal_ee") and hasattr(env_cfg.goal_ee, "urdf_mount"):
         mount_yaw_offset = env_cfg.goal_ee.urdf_mount.mount_yaw_offset
+        mount_xyz = normalize_mount_xyz(env_cfg.goal_ee.urdf_mount.arm_base_offset)
         checkpoint_features["mount_deg"] = normalize_mount_deg(np.degrees(float(mount_yaw_offset)))
+        checkpoint_features["mount_x"] = mount_xyz[0]
+        checkpoint_features["mount_y"] = mount_xyz[1]
+        checkpoint_features["mount_z"] = mount_xyz[2]
     return checkpoint_features
 
 def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
@@ -338,6 +348,9 @@ def load_run_metadata(log_dir, filename=None):
     gait_frequency_ang_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_REF")
     gait_frequency_ang_vel_weight = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_ANG_VEL_WEIGHT")
     mount_deg = _parse_float_from_train_log(train_log_path, "MOUNT_DEG")
+    mount_x = _parse_float_from_train_log(train_log_path, "MOUNT_X")
+    mount_y = _parse_float_from_train_log(train_log_path, "MOUNT_Y")
+    mount_z = _parse_float_from_train_log(train_log_path, "MOUNT_Z")
     ee_goal_obs_mode = _parse_string_from_train_log(train_log_path, "EE_GOAL_OBS_MODE")
     if observe_gait_commands is not None:
         checkpoint_features["observe_gait_commands"] = observe_gait_commands
@@ -361,6 +374,12 @@ def load_run_metadata(log_dir, filename=None):
         checkpoint_features["gait_frequency_ang_vel_weight"] = gait_frequency_ang_vel_weight
     if mount_deg is not None:
         checkpoint_features["mount_deg"] = normalize_mount_deg(mount_deg)
+    if mount_x is not None:
+        checkpoint_features["mount_x"] = float(mount_x)
+    if mount_y is not None:
+        checkpoint_features["mount_y"] = float(mount_y)
+    if mount_z is not None:
+        checkpoint_features["mount_z"] = float(mount_z)
     if checkpoint_features:
         return {
             "checkpoint_features": checkpoint_features,
@@ -583,14 +602,38 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.goal_ee.sphere_center.trunk_follow_ratio = args.trunk_follow_ratio
         if args.omnidirectional_pos_y:
             env_cfg.goal_ee.ranges.omnidirectional_pos_y = True
+        urdf_mount_cfg = getattr(getattr(env_cfg, "goal_ee", None), "urdf_mount", None)
         if args.mount_deg is not None:
             mount_deg = normalize_mount_deg(args.mount_deg)
             args.mount_deg = mount_deg
+        if urdf_mount_cfg is not None:
+            mount_xyz = list(normalize_mount_xyz(urdf_mount_cfg.arm_base_offset))
+            if args.mount_x is not None:
+                mount_xyz[0] = float(args.mount_x)
+            if args.mount_y is not None:
+                mount_xyz[1] = float(args.mount_y)
+            if args.mount_z is not None:
+                mount_xyz[2] = float(args.mount_z)
+            urdf_mount_cfg.arm_base_offset = list(normalize_mount_xyz(mount_xyz))
+
             mount_urdf_generator = getattr(env_cfg.asset, "mount_urdf_generator", None)
             if mount_urdf_generator is not None:
-                env_cfg.goal_ee.urdf_mount.mount_yaw_offset = mount_deg_to_rad(mount_deg)
-                mount_urdf_rel_path = ensure_mount_urdf(LEGGED_GYM_ROOT_DIR, mount_urdf_generator, mount_deg)
-                env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
+                should_generate_mount_urdf = (
+                    args.mount_deg is not None
+                    or args.mount_x is not None
+                    or args.mount_y is not None
+                    or args.mount_z is not None
+                )
+                if should_generate_mount_urdf:
+                    mount_deg = normalize_mount_deg(np.degrees(float(urdf_mount_cfg.mount_yaw_offset)))
+                    urdf_mount_cfg.mount_yaw_offset = mount_deg_to_rad(mount_deg)
+                    mount_urdf_rel_path = ensure_mount_urdf(
+                        LEGGED_GYM_ROOT_DIR,
+                        mount_urdf_generator,
+                        mount_deg,
+                        urdf_mount_cfg.arm_base_offset,
+                    )
+                    env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
         lin_vel_x_min_schedule = _parse_schedule_arg(args.lin_vel_x_min_schedule)
         if lin_vel_x_min_schedule is not None:
             env_cfg.commands.lin_vel_x_min_schedule = lin_vel_x_min_schedule
@@ -725,6 +768,9 @@ def get_args(test=False):
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
         {"name": "--omnidirectional_pos_y", "action": "store_true", "default": None, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
         {"name": "--mount_deg", "type": int, "choices": [0, 90, 180, 270], "help": "Arm mounting yaw in degrees. Selects the generated URDF and matching sampling offset for tasks that enable mount_urdf_generator."},
+        {"name": "--mount_x", "type": float, "help": "Arm mounting x position in the base frame. Selects a generated URDF for tasks that enable mount_urdf_generator."},
+        {"name": "--mount_y", "type": float, "help": "Arm mounting y position in the base frame. Selects a generated URDF for tasks that enable mount_urdf_generator."},
+        {"name": "--mount_z", "type": float, "help": "Arm mounting z position in the base frame. Selects a generated URDF for tasks that enable mount_urdf_generator."},
         {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},

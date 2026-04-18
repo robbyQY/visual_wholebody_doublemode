@@ -18,7 +18,7 @@ RUN_TRAIN_LIB_TEMPLATE="${SH_DIR}/run_train_lib.sh"
 RUN_TRAIN_WORKER_TEMPLATE="${SH_DIR}/run_train_worker.sh"
 
 TASK="b1z1"
-PROJ_NAME="${TASK}-low"
+PROJ_NAME=""
 
 # Training control
 TRAIN_MODE="fresh"      # fresh | resume | load
@@ -39,6 +39,9 @@ MIXED_HEIGHT_REFERENCE=true
 TRUNK_FOLLOW_RATIO="0.5"
 OMNIDIRECTIONAL_POS_Y=false
 MOUNT_DEG="0"              # 0 | 90 | 180 | 270
+MOUNT_X=""                 # empty -> task config default
+MOUNT_Y=""                 # empty -> task config default
+MOUNT_Z=""                 # empty -> task config default
 ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
 
 # Batch mode
@@ -75,6 +78,9 @@ TRAIN_SCALAR_VARS=(
   TRUNK_FOLLOW_RATIO
   OMNIDIRECTIONAL_POS_Y
   MOUNT_DEG
+  MOUNT_X
+  MOUNT_Y
+  MOUNT_Z
   ENABLE_DYNAMIC_GAIT_FREQUENCY
   NOHUP_BACKGROUND
   DISABLE_WANDB
