@@ -45,13 +45,13 @@ from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.terrain import Terrain, Terrain_Perlin
 from rsl_rl.utils import resolve_schedule_value
-from .b1z1_config import B1Z1RoughCfg
+from .manip_loco_base_config import ManipLocoRoughCfg
 
 import sys
 
 class ManipLoco(LeggedRobot):
     name = None
-    cfg: B1Z1RoughCfg
+    cfg: ManipLocoRoughCfg
 
     def __init__(self, cfg, *args, **kwargs):
         is_main_process = not (dist.is_available() and dist.is_initialized()) or dist.get_rank() == 0
@@ -75,7 +75,7 @@ class ManipLoco(LeggedRobot):
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
         actions[:, 12:] = 0.
-        actions = self._reindex_all(actions)
+        actions = self._policy_to_env_all(actions)
         actions = torch.clip(actions, -self.clip_actions, self.clip_actions).to(self.device)
         # step physics and render each frame
         self.render()
@@ -251,10 +251,10 @@ class ManipLoco(LeggedRobot):
 
         obs_terms = [self._get_body_orientation(),  # dim 2
                      self.base_ang_vel * self.obs_scales.ang_vel,  # dim 3
-                     self._reindex_all((self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
-                     self._reindex_all(self.dof_vel * self.obs_scales.dof_vel)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
-                     self._reindex_all(self.action_history_buf[:, -1])[:, :12],  # dim 12
-                     self._reindex_feet(self.foot_contacts_from_sensor),  # dim 4
+                     self._env_to_policy_all((self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
+                     self._env_to_policy_all(self.dof_vel * self.obs_scales.dof_vel)[:, :-self.cfg.env.num_gripper_joints],  # dim 18
+                     self._env_to_policy_all(self.action_history_buf[:, -1])[:, :12],  # dim 12
+                     self.foot_contacts_from_sensor,  # dim 4
                      self.commands[:, :3] * self.commands_scale,  # dim 3
                      ee_goal_local_cart,  # dim 3 position
                      0 * self.curr_ee_goal_sphere]  # dim 3 orientation
@@ -559,9 +559,23 @@ class ManipLoco(LeggedRobot):
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.dof_wo_gripper_names = self.dof_names[:-self.cfg.env.num_gripper_joints]
         self.dof_names_to_idx = self.gym.get_asset_dof_dict(robot_asset)
+        self.base_body_idx = self.body_names_to_idx[self.cfg.asset.base_name]
+        self.policy_leg_joint_names = list(self.cfg.asset.policy_leg_joint_names)
+        self.policy_leg_dof_indices_in_env = torch.tensor(
+            [self.dof_names.index(name) for name in self.policy_leg_joint_names],
+            dtype=torch.long,
+            device=self.device,
+            requires_grad=False,
+        )
+        self.env_leg_dof_indices_in_policy = torch.empty_like(self.policy_leg_dof_indices_in_env)
+        self.env_leg_dof_indices_in_policy[self.policy_leg_dof_indices_in_env] = torch.arange(
+            len(self.policy_leg_joint_names),
+            device=self.device,
+            dtype=torch.long,
+        )
         # self.num_bodies = len(self.body_names)
         # self.num_dofs = len(self.dof_names)
-        feet_names = [s for s in self.body_names if self.cfg.asset.foot_name in s]
+        feet_names = list(self.cfg.asset.policy_foot_names)
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:
             body_names = [s for s in self.body_names if name in s]
@@ -672,7 +686,7 @@ class ManipLoco(LeggedRobot):
         else:
             self.motor_strength = torch.ones(self.num_envs, self.num_torques, device=self.device)
 
-        hip_names = ["FR_hip_joint", "FL_hip_joint", "RR_hip_joint", "RL_hip_joint"]
+        hip_names = list(self.cfg.asset.hip_joint_names)
         self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i, name in enumerate(hip_names):
             self.hip_indices[i] = self.dof_names.index(name)
@@ -711,7 +725,7 @@ class ManipLoco(LeggedRobot):
         if self.cfg.domain_rand.randomize_base_mass:
             rng_mass = self.cfg.domain_rand.added_mass_range
             rand_mass = np.random.uniform(rng_mass[0], rng_mass[1], size=(1, ))
-            props[1].mass += rand_mass
+            props[self.base_body_idx].mass += rand_mass
         else:
             rand_mass = np.zeros(1)
         
@@ -727,7 +741,7 @@ class ManipLoco(LeggedRobot):
             rng_com_y = self.cfg.domain_rand.added_com_range_y
             rng_com_z = self.cfg.domain_rand.added_com_range_z
             rand_com = np.random.uniform([rng_com_x[0], rng_com_y[0], rng_com_z[0]], [rng_com_x[1], rng_com_y[1], rng_com_z[1]], size=(3, ))
-            props[1].com += gymapi.Vec3(*rand_com)
+            props[self.base_body_idx].com += gymapi.Vec3(*rand_com)
         else:
             rand_com = np.zeros(3)
 
@@ -814,9 +828,9 @@ class ManipLoco(LeggedRobot):
         ).repeat(self.num_envs, 1)
         # Keep URDF-derived joint heights centralized in config.
         self.arm_waist_offset = self.arm_base_offset.clone()
-        self.arm_waist_offset[:, 2] += urdf_mount_cfg.z1_waist_offset_z
+        self.arm_waist_offset[:, 2] += urdf_mount_cfg.arm_waist_offset_z
         self.arm_shoulder_offset = self.arm_waist_offset.clone()
-        self.arm_shoulder_offset[:, 2] += urdf_mount_cfg.z1_shoulder_offset_z
+        self.arm_shoulder_offset[:, 2] += urdf_mount_cfg.arm_shoulder_offset_z
         # self.yaw_ema = euler_from_quat(self.base_quat)[2]
         base_yaw = euler_from_quat(self.base_quat)[2]
         self.base_yaw_euler = torch.cat([torch.zeros(self.num_envs, 2, device=self.device), base_yaw.view(-1, 1)], dim=1)
@@ -969,11 +983,24 @@ class ManipLoco(LeggedRobot):
         for i in range(self.num_torques):
             name = self.dof_names[i]
             found = False
-            for dof_name in self.cfg.control.stiffness.keys():
-                if dof_name in name:
-                    self.p_gains[i] = self.cfg.control.stiffness[dof_name]
-                    self.d_gains[i] = self.cfg.control.damping[dof_name]
-                    found = True
+            if name in self.cfg.control.stiffness:
+                self.p_gains[i] = self.cfg.control.stiffness[name]
+                self.d_gains[i] = self.cfg.control.damping[name]
+                found = True
+            else:
+                for dof_name in self.cfg.control.stiffness.keys():
+                    if dof_name in name:
+                        self.p_gains[i] = self.cfg.control.stiffness[dof_name]
+                        self.d_gains[i] = self.cfg.control.damping[dof_name]
+                        found = True
+                        break
+            if not found:
+                for dof_name in self.cfg.control.damping.keys():
+                    if dof_name in name and dof_name in self.cfg.control.stiffness:
+                        self.p_gains[i] = self.cfg.control.stiffness[dof_name]
+                        self.d_gains[i] = self.cfg.control.damping[dof_name]
+                        found = True
+                        break
             if not found:
                 self.p_gains[i] = 0.
                 self.d_gains[i] = 0.
@@ -1022,7 +1049,7 @@ class ManipLoco(LeggedRobot):
             "close_gripper",
         }
         self.teleop_held_actions = {}
-        self.arm_waist_idx = self.dof_names.index("z1_waist")
+        self.arm_waist_idx = self.dof_names.index(self.cfg.asset.arm_waist_name)
         self.omnidirectional_init_pos_y_limits = torch.tensor(
             self.cfg.goal_ee.ranges.omnidirectional_init_pos_y,
             device=self.device,
@@ -1377,18 +1404,20 @@ class ManipLoco(LeggedRobot):
 
         return noise_vec
     
-    def _reindex_feet(self, vec):
-        # raisim_order = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
-        # ig_order = ['FL_foot', 'FR_foot', 'RL_foot', 'RR_foot']
-        if self.cfg.env.reorder_dofs:
-            return vec[:, [1, 0, 3, 2]]
-        return vec
+    def _env_to_policy_all(self, vec):
+        if not self.cfg.env.reorder_dofs:
+            return vec
+        return torch.hstack((vec[:, self.env_leg_dof_indices_in_policy], vec[:, 12:]))
 
-    def _reindex_all(self, vec):
-        return torch.hstack((vec[:, [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]], vec[:, 12:]))
-    
-    def _reindex_dog(self, vec):
-        return vec[:, [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]]
+    def _policy_to_env_all(self, vec):
+        if not self.cfg.env.reorder_dofs:
+            return vec
+        return torch.hstack((vec[:, self.policy_leg_dof_indices_in_env], vec[:, 12:]))
+
+    def _env_to_policy_dog(self, vec):
+        if not self.cfg.env.reorder_dofs:
+            return vec
+        return vec[:, self.env_leg_dof_indices_in_policy]
     
     def _get_body_orientation(self, return_yaw=False):
         r, p, y = euler_from_quat(self.base_quat)
@@ -1434,9 +1463,9 @@ class ManipLoco(LeggedRobot):
         trunk_follow_anchor = self.cfg.goal_ee.sphere_center.trunk_follow_anchor
         if trunk_follow_anchor == "arm_base":
             trunk_follow_center_offset = self.arm_base_offset
-        elif trunk_follow_anchor == "z1_waist":
+        elif trunk_follow_anchor == "arm_waist":
             trunk_follow_center_offset = self.arm_waist_offset
-        elif trunk_follow_anchor == "z1_shoulder":
+        elif trunk_follow_anchor == "arm_shoulder":
             trunk_follow_center_offset = self.arm_shoulder_offset
         else:
             raise ValueError(f"Unsupported trunk_follow_anchor: {trunk_follow_anchor}")

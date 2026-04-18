@@ -8,24 +8,24 @@ import numpy as np
 from .manip_loco_base_config import ManipLocoRoughCfg, ManipLocoRoughCfgPPO
 
 
-class B1Z1RoughCfg(ManipLocoRoughCfg):
+class B2Z1RoughCfg(ManipLocoRoughCfg):
     class goal_ee(ManipLocoRoughCfg.goal_ee):
         class urdf_mount(ManipLocoRoughCfg.goal_ee.urdf_mount):
-            arm_base_offset = [0.3, 0.0, 0.09]
+            arm_base_offset = [0.0, 0.0, 0.0]
             mount_yaw_offset = 0.0
             arm_waist_offset_z = 0.0585
             arm_shoulder_offset_z = 0.045
 
         class sphere_center(ManipLocoRoughCfg.goal_ee.sphere_center):
-            x_offset = 0.3
+            x_offset = 0.25
             y_offset = 0.0
-            z_invariant_offset = 0.7
+            z_invariant_offset = 0.72
             mixed_height_reference = False
             trunk_follow_ratio = 0.5
             trunk_follow_anchor = "arm_waist"
 
     class init_state(ManipLocoRoughCfg.init_state):
-        pos = [0.0, 0.0, 0.5]
+        pos = [0.0, 0.0, 0.58]
         default_joint_angles = {
             "FL_hip_joint": 0.2,
             "FL_thigh_joint": 0.8,
@@ -39,13 +39,13 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             "RR_hip_joint": -0.2,
             "RR_thigh_joint": 0.8,
             "RR_calf_joint": -1.5,
-            "z1_waist": 0.0,
-            "z1_shoulder": 1.48,
-            "z1_elbow": -0.63,
-            "z1_wrist_angle": -0.84,
-            "z1_forearm_roll": 0.0,
-            "z1_wrist_rotate": 1.57,
-            "z1_jointGripper": -0.785,
+            "joint1": 0.0,
+            "joint2": 1.48,
+            "joint3": -0.63,
+            "joint4": -0.84,
+            "joint5": 0.0,
+            "joint6": 1.57,
+            "jointGripper": -0.785,
         }
         rand_yaw_range = np.pi / 2
         origin_perturb_range = 0.5
@@ -65,13 +65,13 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             "RR_hip_joint": 80,
             "RR_thigh_joint": 80,
             "RR_calf_joint": 80,
-            "z1_waist": 5,
-            "z1_shoulder": 5,
-            "z1_elbow": 5,
-            "z1_wrist_angle": 5,
-            "z1_forearm_roll": 5,
-            "z1_wrist_rotate": 5,
-            "z1_jointGripper": 5,
+            "joint1": 5,
+            "joint2": 5,
+            "joint3": 5,
+            "joint4": 5,
+            "joint5": 5,
+            "joint6": 5,
+            "jointGripper": 5,
         }
         damping = {
             "FL_hip_joint": 2.0,
@@ -86,13 +86,13 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             "RR_hip_joint": 2.0,
             "RR_thigh_joint": 2.0,
             "RR_calf_joint": 2.0,
-            "z1_waist": 0.5,
-            "z1_shoulder": 0.5,
-            "z1_elbow": 0.5,
-            "z1_wrist_angle": 0.5,
-            "z1_forearm_roll": 0.5,
-            "z1_wrist_rotate": 0.5,
-            "z1_jointGripper": 0.5,
+            "joint1": 0.5,
+            "joint2": 0.5,
+            "joint3": 0.5,
+            "joint4": 0.5,
+            "joint5": 0.5,
+            "joint6": 0.5,
+            "jointGripper": 0.5,
         }
         adaptive_arm_gains = False
         action_scale = [0.4, 0.45, 0.45] * 2 + [0.4, 0.45, 0.45] * 2 + [2.1, 0.6, 0.6, 0, 0, 0]
@@ -100,11 +100,11 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
         torque_supervision = False
 
     class asset(ManipLocoRoughCfg.asset):
-        file = "{LEGGED_GYM_ROOT_DIR}/resources/robots/b1z1/urdf/b1z1.urdf"
-        base_name = "trunk"
+        file = "{LEGGED_GYM_ROOT_DIR}/resources/robots/b2z1/urdf/b2z1.urdf"
+        base_name = "base_link"
         foot_name = "foot"
-        gripper_name = "ee_gripper_link"
-        arm_waist_name = "z1_waist"
+        gripper_name = "gripper_link"
+        arm_waist_name = "joint1"
         hip_joint_names = ["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"]
         policy_leg_joint_names = [
             "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
@@ -113,27 +113,27 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
         ]
         policy_foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-        penalize_contacts_on = ["thigh", "trunk", "calf"]
+        penalize_contacts_on = ["thigh", "base_link", "calf"]
         terminate_after_contacts_on = []
-        mount_urdf_generator = "b1z1"
+        mount_urdf_generator = "b2z1"
         self_collisions = 0
         flip_visual_attachments = False
         collapse_fixed_joints = True
         fix_base_link = False
 
     class arm(ManipLocoRoughCfg.arm):
-        init_target_ee_base = [0.2, 0.0, 0.2]
+        init_target_ee_base = [0.25, 0.0, 0.2]
         grasp_offset = 0.08
         osc_kp = np.array([100, 100, 100, 30, 30, 30])
         osc_kd = 2 * (osc_kp ** 0.5)
 
     class rewards(ManipLocoRoughCfg.rewards):
         reward_scale_preset = "legacy"
-        base_height_target = 0.55
-        base_height_target_min = 0.3
-        base_height_target_max = 0.7
-        posture_reference_stand_height = 0.55
-        posture_reference_crouch_height = 0.35
+        base_height_target = 0.58
+        base_height_target_min = 0.33
+        base_height_target_max = 0.75
+        posture_reference_stand_height = 0.58
+        posture_reference_crouch_height = 0.38
         leg_posture_exp_scale = 0.05
         crouch_hip_delta = 0.0
         crouch_thigh_delta = 0.35
@@ -198,14 +198,14 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             tracking_ee_orn_ry = None
 
 
-class B1Z1RoughCfgPPO(ManipLocoRoughCfgPPO):
+class B2Z1RoughCfgPPO(ManipLocoRoughCfgPPO):
     class policy(ManipLocoRoughCfgPPO.policy):
-        adaptive_arm_gains = B1Z1RoughCfg.control.adaptive_arm_gains
+        adaptive_arm_gains = B2Z1RoughCfg.control.adaptive_arm_gains
 
     class algorithm(ManipLocoRoughCfgPPO.algorithm):
-        torque_supervision = B1Z1RoughCfg.control.torque_supervision
+        torque_supervision = B2Z1RoughCfg.control.torque_supervision
         torque_supervision_schedule = [0.0, 1000, 1000]
-        adaptive_arm_gains = B1Z1RoughCfg.control.adaptive_arm_gains
+        adaptive_arm_gains = B2Z1RoughCfg.control.adaptive_arm_gains
 
     class runner(ManipLocoRoughCfgPPO.runner):
-        experiment_name = "b1z1_v2"
+        experiment_name = "b2z1_v2"

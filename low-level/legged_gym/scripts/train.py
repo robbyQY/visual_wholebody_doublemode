@@ -317,7 +317,12 @@ def train(args):
             }
         }, filename=args.run_metadata_filename)
         wandb.config.update(build_wandb_config(args, env_cfg, train_cfg, log_pth), allow_val_change=True)
-        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/b1z1_config.py", policy="now")
+        task_config_path = os.path.join(LEGGED_GYM_ENVS_DIR, "manip_loco", f"{args.task}_config.py")
+        if os.path.isfile(task_config_path):
+            wandb.save(task_config_path, policy="now")
+        base_config_path = os.path.join(LEGGED_GYM_ENVS_DIR, "manip_loco", "manip_loco_base_config.py")
+        if os.path.isfile(base_config_path):
+            wandb.save(base_config_path, policy="now")
         wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
     wandb.finish()

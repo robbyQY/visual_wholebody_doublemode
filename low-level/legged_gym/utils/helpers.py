@@ -41,7 +41,7 @@ from isaacgym import gymapi
 from isaacgym import gymutil
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
-from .b1z1_mount import ensure_b1z1_mount_urdf, mount_deg_to_rad, normalize_mount_deg
+from .b1z1_mount import ensure_mount_urdf, mount_deg_to_rad, normalize_mount_deg
 
 RUN_METADATA_FILENAME = "run_metadata.json"
 CHECKPOINT_FEATURE_NAMES = (
@@ -586,9 +586,11 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         if args.mount_deg is not None:
             mount_deg = normalize_mount_deg(args.mount_deg)
             args.mount_deg = mount_deg
-            env_cfg.goal_ee.urdf_mount.mount_yaw_offset = mount_deg_to_rad(mount_deg)
-            mount_urdf_rel_path = ensure_b1z1_mount_urdf(LEGGED_GYM_ROOT_DIR, mount_deg)
-            env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
+            mount_urdf_generator = getattr(env_cfg.asset, "mount_urdf_generator", None)
+            if mount_urdf_generator is not None:
+                env_cfg.goal_ee.urdf_mount.mount_yaw_offset = mount_deg_to_rad(mount_deg)
+                mount_urdf_rel_path = ensure_mount_urdf(LEGGED_GYM_ROOT_DIR, mount_urdf_generator, mount_deg)
+                env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
         lin_vel_x_min_schedule = _parse_schedule_arg(args.lin_vel_x_min_schedule)
         if lin_vel_x_min_schedule is not None:
             env_cfg.commands.lin_vel_x_min_schedule = lin_vel_x_min_schedule
@@ -722,7 +724,7 @@ def get_args(test=False):
         {"name": "--mixed_height_reference", "action": "store_true", "default": None, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
         {"name": "--omnidirectional_pos_y", "action": "store_true", "default": None, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
-        {"name": "--mount_deg", "type": int, "choices": [0, 90, 180, 270], "help": "B1Z1 arm mounting yaw in degrees. Selects the generated URDF and matching sampling offset."},
+        {"name": "--mount_deg", "type": int, "choices": [0, 90, 180, 270], "help": "Arm mounting yaw in degrees. Selects the generated URDF and matching sampling offset for tasks that enable mount_urdf_generator."},
         {"name": "--lin_vel_x_min_schedule", "type": str, "help": "Curriculum for lin_vel_x command minimum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--lin_vel_x_max_schedule", "type": str, "help": "Curriculum for lin_vel_x command maximum as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},

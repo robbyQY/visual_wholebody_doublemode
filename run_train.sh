@@ -17,8 +17,8 @@ RDZV_PORT_OVERRIDE="${RDZV_PORT:-}"
 RUN_TRAIN_LIB_TEMPLATE="${SH_DIR}/run_train_lib.sh"
 RUN_TRAIN_WORKER_TEMPLATE="${SH_DIR}/run_train_worker.sh"
 
-PROJ_NAME="b1z1-low"
 TASK="b1z1"
+PROJ_NAME="${TASK}-low"
 
 # Training control
 TRAIN_MODE="fresh"      # fresh | resume | load

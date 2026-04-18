@@ -29,7 +29,8 @@ ROOT_DIR="/workspace/visual_wholebody/low-level"
 SCRIPT_DIR="${ROOT_DIR}/legged_gym/scripts"
 LOG_ROOT="/data/logs"
 
-PROJ_NAME="b1z1-low"
+TASK="b1z1"
+PROJ_NAME="${TASK}-low"
 EXPTID="train_default"
 CHECKPOINT="45000"
 CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
@@ -50,7 +51,7 @@ cd "${SCRIPT_DIR}"
 
 python "play.py" \
   --exptid "${EXPTID}" \
-  --task b1z1 \
+  --task "${TASK}" \
   --proj_name "${PROJ_NAME}" \
   --checkpoint "${CHECKPOINT}" \
   --sim_device "cuda:${GPU_ID}" \
