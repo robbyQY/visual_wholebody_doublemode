@@ -35,13 +35,13 @@ WANDB_GROUP=""
 EE_GOAL_OBS_MODE="command"  # command | arm_base_target
 REWARD_SCALE_PRESET="legacy"  # legacy | height_flexible
 OBSERVE_GAIT_COMMANDS=true
+ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
 MIXED_HEIGHT_REFERENCE=true
 TRUNK_FOLLOW_RATIO="0.5"
 OMNIDIRECTIONAL_POS_Y=false
-MOUNT_DEG="0"              # 0 | 90 | 180 | 270
+MOUNT_DEG=""               # 0 | 90 | 180 | 270
 MOUNT_X=""                 # empty -> task config default
 MOUNT_Y=""                 # empty -> task config default
-ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
 
 # Batch mode
 TASK_OPTIONS_CSV=""

@@ -15,7 +15,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
-          <box size="0.5 0.28 0.15" />
+          <box size="0.568 0.295 0.255" />
         </geometry>
     </collision>
   </link>
@@ -25,13 +25,6 @@
       <mass value="4.19E-15" />
       <inertia ixx="1.68E-27" ixy="-3.2E-45" ixz="7.68E-44" iyy="1.68E-27" iyz="-9.26E-47" izz="1.68E-27" />
     </inertial>
-    <collision>
-      <origin xyz="0 0 -0.02" rpy="0 0 0" />
-      <geometry>
-        <cylinder length="0.16" radius="0.076" />
-
-      </geometry>
-    </collision>
   </link>
   <joint name="joint_lidar" type="fixed">
     <origin xyz="0.34218 0 0.17851" rpy="0 0 0" />
@@ -84,12 +77,6 @@
       <mass value="3.6885" />
       <inertia ixx="0.026455" ixy="3.15E-05" ixz="0.00166" iyy="0.029221" iyz="-3.27E-05" izz="0.010918" />
     </inertial>
-    <collision>
-      <origin xyz="0.41 0 0.005" rpy="0 0 0" />
-      <geometry>
-        <box size="0.04 0.12 0.14" />
-      </geometry>
-    </collision>
   </link>
   <joint name="joint_head" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -103,12 +90,6 @@
       <mass value="0.795" />
       <inertia ixx="0.0028118" ixy="1.95E-05" ixz="-7.87E-06" iyy="0.0047506" iyz="-1.57E-05" izz="0.0029154" />
     </inertial>
-    <collision>
-      <origin xyz="-0.405 0 0.005" rpy="0 0 0" />
-      <geometry>
-        <box size="0.025 0.12 0.14" />
-      </geometry>
-    </collision>
   </link>
   <joint name="joint_tail" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -128,12 +109,6 @@
         <mesh filename="../meshes/FL_hip.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material></visual>
-    <collision>
-      <origin xyz="0 0.12 0" rpy="1.5707963267948966 0 0" />
-      <geometry>
-        <cylinder length="0.05" radius="0.07" />
-      </geometry>
-    </collision>
   </link>
   <joint name="FL_hip_joint" type="revolute">
     <origin xyz="0.3285 0.072 0" rpy="0 0 0" />
@@ -144,12 +119,6 @@
   </joint>
   <link name="FL_hip_rotor">
 
-    <collision>
-      <origin rpy="0 1.5707963267948966 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -173,10 +142,11 @@
         <mesh filename="../meshes/FL_thigh.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material><material name="灰色硅胶_009-effect"><color rgba="0.6500053 0.68 0.6500053 1" /></material></visual>
+
     <collision>
-      <origin xyz="-0.025 0 -0.16" rpy="0 1.57 0" />
+      <origin xyz="0 0 -0.169" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.32 0.0445 0.054" />
+        <box size="0.338 0.054 0.065" />
       </geometry>
     </collision>
   </link>
@@ -189,12 +159,6 @@
   </joint>
   <link name="FL_thigh_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -218,28 +182,11 @@
         <mesh filename="../meshes/FL_calf.dae" />
       </geometry>
       <material name="磨砂铝合金_018-effect"><color rgba="0.74876 0.74876 0.74876 1" /></material><material name="材质_005-effect"><color rgba="0.07323546 0.07323546 0.07323546 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.2 0" xyz="-0.002 0 -0.03" />
+      <origin xyz="0 0 -0.171" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.35 0" xyz="0.022 0 -0.1" />
-      <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.53 0" xyz="0.036 0 -0.225" />
-      <geometry>
-        <box size="0.15 0.0245 0.015" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 2 0" xyz="0.023 0 -0.31" />
-      <geometry>
-        <box size="0.05 0.028 0.035" />
+        <box size="0.342 0.04 0.047" />
       </geometry>
     </collision>
   </link>
@@ -252,12 +199,6 @@
   </joint>
   <link name="FL_calf_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -276,7 +217,7 @@
       <inertia ixx="3.8E-05" ixy="0" ixz="1.1E-05" iyy="4.1E-05" iyz="0" izz="4.2E-05" />
     </inertial>
     <collision>
-      <origin xyz="0 0 0" rpy="1.57 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <sphere radius="0.032" />
       </geometry>
@@ -299,12 +240,6 @@
         <mesh filename="../meshes/FR_hip.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material></visual>
-    <collision>
-      <origin xyz="0 -0.12 0" rpy="1.5707963267948966 0 0" />
-      <geometry>
-        <cylinder length="0.05" radius="0.07" />
-      </geometry>
-    </collision>
   </link>
   <joint name="FR_hip_joint" type="revolute">
     <origin xyz="0.3285 -0.072 0" rpy="0 0 0" />
@@ -315,12 +250,6 @@
   </joint>
   <link name="FR_hip_rotor">
 
-    <collision>
-      <origin rpy="0 1.5707963267948966 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -344,10 +273,11 @@
         <mesh filename="../meshes/FR_thigh.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material><material name="灰色硅胶_009-effect"><color rgba="0.6500053 0.68 0.6500053 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.57 0" xyz="-0.03 0 -0.2" />
+      <origin xyz="0 0 -0.169" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.25 0.028 0.04" />
+        <box size="0.338 0.054 0.065" />
       </geometry>
     </collision>
   </link>
@@ -360,12 +290,6 @@
   </joint>
   <link name="FR_thigh_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -389,28 +313,11 @@
         <mesh filename="../meshes/FR_calf.dae" />
       </geometry>
       <material name="磨砂铝合金_018-effect"><color rgba="0.74876 0.74876 0.74876 1" /></material><material name="材质_005-effect"><color rgba="0.07323546 0.07323546 0.07323546 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.2 0" xyz="-0.002 0 -0.03" />
+      <origin xyz="0 0 -0.171" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.35 0" xyz="0.022 0 -0.1" />
-      <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.53 0" xyz="0.036 0 -0.225" />
-      <geometry>
-        <box size="0.15 0.0245 0.015" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 2 0" xyz="0.023 0 -0.31" />
-      <geometry>
-        <box size="0.05 0.028 0.035" />
+        <box size="0.342 0.04 0.047" />
       </geometry>
     </collision>
   </link>
@@ -423,12 +330,6 @@
   </joint>
   <link name="FR_calf_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -447,7 +348,7 @@
       <inertia ixx="3.8E-05" ixy="0" ixz="1.1E-05" iyy="4.1E-05" iyz="0" izz="4.2E-05" />
     </inertial>
     <collision>
-      <origin xyz="0 0 0" rpy="1.57 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <sphere radius="0.032" />
       </geometry>
@@ -470,12 +371,6 @@
         <mesh filename="../meshes/RL_hip.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material></visual>
-    <collision>
-      <origin xyz="0 0.12 0" rpy="1.5707963267948966 0 0" />
-      <geometry>
-        <cylinder length="0.05" radius="0.07" />
-      </geometry>
-    </collision>
   </link>
   <joint name="RL_hip_joint" type="revolute">
     <origin xyz="-0.3285 0.072 0" rpy="0 0 0" />
@@ -486,12 +381,6 @@
   </joint>
   <link name="RL_hip_rotor">
 
-    <collision>
-      <origin rpy="0 1.5707963267948966 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -515,10 +404,11 @@
         <mesh filename="../meshes/RL_thigh.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material><material name="灰色硅胶_009-effect"><color rgba="0.6500053 0.68 0.6500053 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.57 0" xyz="-0.03 0 -0.2" />
+      <origin xyz="0 0 -0.169" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.25 0.028 0.04" />
+        <box size="0.338 0.054 0.065" />
       </geometry>
     </collision>
   </link>
@@ -531,12 +421,6 @@
   </joint>
   <link name="RL_thigh_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -560,28 +444,11 @@
         <mesh filename="../meshes/RL_calf.dae" />
       </geometry>
       <material name="磨砂铝合金_018-effect"><color rgba="0.74876 0.74876 0.74876 1" /></material><material name="材质_005-effect"><color rgba="0.07323546 0.07323546 0.07323546 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.2 0" xyz="-0.002 0 -0.03" />
+      <origin xyz="0 0 -0.171" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.35 0" xyz="0.022 0 -0.1" />
-      <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.53 0" xyz="0.036 0 -0.225" />
-      <geometry>
-        <box size="0.15 0.0245 0.015" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 2 0" xyz="0.023 0 -0.31" />
-      <geometry>
-        <box size="0.05 0.028 0.035" />
+        <box size="0.342 0.04 0.047" />
       </geometry>
     </collision>
   </link>
@@ -594,12 +461,6 @@
   </joint>
   <link name="RL_calf_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -618,7 +479,7 @@
       <inertia ixx="3.8E-05" ixy="0" ixz="1.1E-05" iyy="4.1E-05" iyz="0" izz="4.2E-05" />
     </inertial>
     <collision>
-      <origin xyz="0 0 0" rpy="1.57 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <sphere radius="0.032" />
       </geometry>
@@ -641,12 +502,6 @@
         <mesh filename="../meshes/RR_hip.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material></visual>
-    <collision>
-      <origin xyz="0 -0.12 0" rpy="1.5707963267948966 0 0" />
-      <geometry>
-        <cylinder length="0.05" radius="0.07" />
-      </geometry>
-    </collision>
   </link>
   <joint name="RR_hip_joint" type="revolute">
     <origin xyz="-0.3285 -0.072 0" rpy="0 0 0" />
@@ -657,12 +512,6 @@
   </joint>
   <link name="RR_hip_rotor">
 
-    <collision>
-      <origin rpy="0 1.5707963267948966 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -686,10 +535,11 @@
         <mesh filename="../meshes/RR_thigh.dae" />
       </geometry>
       <material name="磨砂铝合金_008-effect"><color rgba="0.85 0.85 0.85 1" /></material><material name="灰色硅胶_009-effect"><color rgba="0.6500053 0.68 0.6500053 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.57 0" xyz="-0.03 0 -0.2" />
+      <origin xyz="0 0 -0.169" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.25 0.028 0.04" />
+        <box size="0.338 0.054 0.065" />
       </geometry>
     </collision>
   </link>
@@ -702,12 +552,6 @@
   </joint>
   <link name="RR_thigh_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -731,28 +575,11 @@
         <mesh filename="../meshes/RR_calf.dae" />
       </geometry>
       <material name="磨砂铝合金_018-effect"><color rgba="0.74876 0.74876 0.74876 1" /></material><material name="材质_005-effect"><color rgba="0.07323546 0.07323546 0.07323546 1" /></material></visual>
+
     <collision>
-      <origin rpy="0 1.2 0" xyz="-0.002 0 -0.03" />
+      <origin xyz="0 0 -0.171" rpy="0 1.5707963267948966 0" />
       <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.35 0" xyz="0.022 0 -0.1" />
-      <geometry>
-        <box size="0.1 0.0245 0.018" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 1.53 0" xyz="0.036 0 -0.225" />
-      <geometry>
-        <box size="0.15 0.0245 0.015" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin rpy="0 2 0" xyz="0.023 0 -0.31" />
-      <geometry>
-        <box size="0.05 0.028 0.035" />
+        <box size="0.342 0.04 0.047" />
       </geometry>
     </collision>
   </link>
@@ -765,12 +592,6 @@
   </joint>
   <link name="RR_calf_rotor">
 
-    <collision>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
-      <geometry>
-        <cylinder length="0.02" radius="0.05" />
-      </geometry>
-    </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
       <mass value="0.2734" />
@@ -789,7 +610,7 @@
       <inertia ixx="3.8E-05" ixy="0" ixz="1.1E-05" iyy="4.1E-05" iyz="0" izz="4.2E-05" />
     </inertial>
     <collision>
-      <origin xyz="0 0 0" rpy="1.57 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <sphere radius="0.032" />
       </geometry>
@@ -828,16 +649,11 @@
     <child link="r_oc_link" />
     <axis xyz="0 0 0" />
   </joint>
-
-
-  <!-- ========================= Z1 ARM (mounted on B2 base_link) ========================= -->
-  <!-- NOTE: adjust xyz/rpy below to match your mechanical adapter pose. -->
   <joint name="z1_mount_joint" type="fixed">
     <origin xyz="0.0 0.0 0.09" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="link00" />
   </joint>
-
   <link name="link00">
     <visual>
       <origin rpy="1.5707963267948966 0 0" xyz="0 0 0"/>
@@ -847,7 +663,7 @@
     </visual>
     <collision>
       <geometry>
-        <cylinder length="0.051" radius="0.0325"/>
+        <cylinder length="0.03" radius="0.0325"/>
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 0.0255"/>
     </collision>
@@ -894,7 +710,7 @@
       </geometry>
     </visual>
     <collision>
-      <geometry><cylinder length="0.102" radius="0.0325"/></geometry>
+      <geometry><cylinder length="0.102" radius="0.02"/></geometry>
       <origin rpy="1.5707963267948966 0 0" xyz="0 0 0"/>
     </collision>
     <collision>
@@ -932,7 +748,7 @@
     </collision>
     <collision>
       <geometry><cylinder length="0.059" radius="0.0325"/></geometry>
-      <origin rpy="0 1.5707963267948966 1.5707963267948966" xyz="0.2205 0 0.055"/>
+      <origin rpy="0 1.5707963267948966 0" xyz="0.2205 0 0.055"/>
     </collision>
     <inertial>
       <origin rpy="0 0 0" xyz="0.10609208 -0.00541815 0.03476383"/>
@@ -950,7 +766,7 @@
   </joint>
   <link name="link04">
     <visual><origin rpy="1.5707963267948966 0 0" xyz="0 0 0"/><geometry><mesh filename="../meshes/z1_Link04.dae" scale="1 1 1"/></geometry></visual>
-    <collision><geometry><cylinder length="0.067" radius="0.0325"/></geometry><origin rpy="0 0 0" xyz="0.072 0 0"/></collision>
+    <collision><geometry><cylinder length="0.073" radius="0.0325"/></geometry><origin rpy="1.5707963267948966 0 0" xyz="0.0472 0 0"/></collision>
     <inertial><origin rpy="0 0 0" xyz="0.04366681 0.00364738 -0.00170192"/><mass value="0.56404563"/><inertia ixx="0.00031576" ixy="8.13e-05" ixz="4.091e-05" iyy="0.00092996" iyz="-5.96e-06" izz="0.00097912"/></inertial>
   </link>
   <joint name="joint5" type="revolute">
@@ -978,32 +794,67 @@
     <collision><geometry><cylinder length="0.051" radius="0.0325"/></geometry><origin rpy="0 1.5707963267948966 0" xyz="0.0255 0 0"/></collision>
     <inertial><origin rpy="0 0 0" xyz="0.0241569 -0.00017355 -0.00143876"/><mass value="0.28875807"/><inertia ixx="0.00018328" ixy="1.22e-06" ixz="5.4e-07" iyy="0.0001475" iyz="8e-08" izz="0.0001468"/></inertial>
   </link>
-
-  <joint name="jointGripper" type="revolute">
-    <origin rpy="0 0 0" xyz="0.051 0 0"/>
-    <parent link="link06"/>
-    <child link="gripper_link"/>
-    <axis xyz="0 1 0"/>
-    <dynamics damping="0.5" friction="0.5"/>
-    <limit effort="20.0" lower="-0.78539816339" upper="0.78539816339" velocity="3.1415"/>
+  <joint name="jointGripperStator" type="fixed">
+    <origin rpy="0 0 0" xyz="0.051 0 0" />
+    <parent link="link06" />
+    <child link="gripperStator" />
   </joint>
-  <link name="gripper_link">
+  <link name="gripperStator">
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
       <geometry>
-        <box size="0.06 0.02 0.02"/>
+        <mesh filename="../meshes/z1_GripperStator.dae" scale="1 1 1" />
       </geometry>
     </visual>
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
       <geometry>
-        <box size="0.06 0.02 0.02"/>
+        <mesh filename="../meshes/z1_GripperStator.dae" scale="1 1 1" />
       </geometry>
     </collision>
     <inertial>
-      <origin rpy="0 0 0" xyz="0.02 0 0"/>
-      <mass value="0.80324957"/>
-      <inertia ixx="5.35499713e-05" ixy="0" ixz="0" iyy="2.67749856e-04" iyz="0" izz="2.67749856e-04"/>
+      <origin rpy="1.5707963267948966 0 0" xyz="0.04764427 -0.00035819 -0.00249162" />
+      <mass value="0.52603655" />
+      <inertia ixx="0.00038683" ixy="3.59e-06" ixz="-7.662e-05" iyy="0.00068614" iyz="-2.09e-06" izz="0.00066293" />
+    </inertial>
+  </link>
+  <joint name="jointGripper" type="revolute">
+    <origin rpy="0 0 0" xyz="0.049 0 0" />
+    <parent link="gripperStator" />
+    <child link="gripperMover" />
+    <axis xyz="0 1 0" />
+    <dynamics damping="0.5" friction="0.5" />
+    <limit effort="20.0" lower="-0.78539816339" upper="0.78539816339" velocity="3.1415" />
+  </joint>
+  <link name="gripperMover">
+    <visual>
+      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/z1_GripperMover.dae" scale="1 1 1" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/z1_GripperMover.dae" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="1.5707963267948966 0 0" xyz="0.01320633 0.00476708 0.00380534" />
+      <mass value="0.27621302" />
+      <inertia ixx="0.00017716" ixy="-1.683e-05" ixz="1.786e-05" iyy="0.00026787" iyz="-2.62e-06" izz="0.00035728" />
+    </inertial>
+  </link>
+  <joint name="ee_gripper" type="fixed" dont_collapse="true">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.135 0 0" />
+    <parent link="gripperStator" />
+    <child link="gripper_link" />
+  </joint>
+  <link name="gripper_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001" />
     </inertial>
   </link>
   

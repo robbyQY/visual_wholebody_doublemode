@@ -33,6 +33,7 @@ import os
 from datetime import datetime
 import glob
 import sys
+import signal
 import isaacgym
 import torch.distributed as dist
 
@@ -42,6 +43,54 @@ from legged_gym.utils import get_args, task_registry, class_to_dict
 from legged_gym.utils.helpers import load_run_metadata, save_run_metadata, update_run_metadata, get_run_log_dir, update_cfg_from_args, _extract_checkpoint_features, apply_checkpoint_features_from_run
 import torch
 import wandb
+
+def _make_training_signal_handler(signal_name):
+    def _handler(signum, frame):
+        raise KeyboardInterrupt(f"Received {signal_name} ({signum})")
+    return _handler
+
+
+def install_training_signal_handlers():
+    signal_names = {
+        signal.SIGINT: "SIGINT",
+        signal.SIGTERM: "SIGTERM",
+    }
+    previous_handlers = {}
+    for sig, sig_name in signal_names.items():
+        previous_handlers[sig] = signal.getsignal(sig)
+        signal.signal(sig, _make_training_signal_handler(sig_name))
+    return previous_handlers
+
+
+def restore_training_signal_handlers(previous_handlers):
+    for sig, handler in previous_handlers.items():
+        signal.signal(sig, handler)
+
+
+def safe_finish_wandb(wandb_initialized, cancelled):
+    if not wandb_initialized:
+        return
+    try:
+        wandb.finish(exit_code=0 if cancelled else None)
+    except Exception as exc:
+        print(f"Warning: wandb.finish failed: {exc}", file=sys.stderr)
+
+
+def safe_cleanup_distributed(cancelled):
+    if not (dist.is_available() and dist.is_initialized()):
+        return
+
+    if not cancelled:
+        try:
+            dist.barrier()
+        except Exception as exc:
+            print(f"Warning: dist.barrier failed: {exc}", file=sys.stderr)
+
+    try:
+        dist.destroy_process_group()
+    except Exception as exc:
+        print(f"Warning: dist.destroy_process_group failed: {exc}", file=sys.stderr)
+
 
 def _wandb_safe(obj):
     if isinstance(obj, dict):
@@ -279,59 +328,67 @@ def setup_distributed(args):
 
 def train(args):
     args = setup_distributed(args)
+    previous_signal_handlers = install_training_signal_handlers()
+    wandb_initialized = False
+    cancelled = False
     args, log_pth = resolve_training_context_distributed(args)
     os.makedirs(log_pth, exist_ok=True)
-    if args.rank == 0 and args.log_file_path:
-        sys.stdout = TimestampedTee(sys.stdout, args.log_file_path, args.rank)
-        sys.stderr = TimestampedTee(sys.stderr, args.log_file_path, args.rank)
-    if getattr(args, "effective_train_mode", getattr(args, "train_mode", "fresh")) == "resume":
-        args, _ = apply_checkpoint_features_from_run(
-            args,
-            log_pth,
-            verbose=args.rank == 0,
-            filename=getattr(args, "run_metadata_filename", None),
-        )
-    env_cfg_preview, _ = task_registry.get_cfgs(args.task)
-    env_cfg_preview, _ = update_cfg_from_args(env_cfg_preview, None, args)
-    log_training_header(args, log_pth, args.world_size if args.distributed else 1, env_cfg_preview)
-    if args.debug:
-        mode = "disabled"
-        args.rows = 6
-        args.cols = 2
-        args.num_envs = 128
-    else:
-        mode = "online"
-    if args.rank != 0:
-        mode = "disabled"
-    wandb.init(**get_wandb_init_kwargs(args, log_pth, mode))
+    try:
+        if args.rank == 0 and args.log_file_path:
+            sys.stdout = TimestampedTee(sys.stdout, args.log_file_path, args.rank)
+            sys.stderr = TimestampedTee(sys.stderr, args.log_file_path, args.rank)
+        if getattr(args, "effective_train_mode", getattr(args, "train_mode", "fresh")) == "resume":
+            args, _ = apply_checkpoint_features_from_run(
+                args,
+                log_pth,
+                verbose=args.rank == 0,
+                filename=getattr(args, "run_metadata_filename", None),
+            )
+        env_cfg_preview, _ = task_registry.get_cfgs(args.task)
+        env_cfg_preview, _ = update_cfg_from_args(env_cfg_preview, None, args)
+        log_training_header(args, log_pth, args.world_size if args.distributed else 1, env_cfg_preview)
+        if args.debug:
+            mode = "disabled"
+            args.rows = 6
+            args.cols = 2
+            args.num_envs = 128
+        else:
+            mode = "online"
+        if args.rank != 0:
+            mode = "disabled"
+        wandb.init(**get_wandb_init_kwargs(args, log_pth, mode))
+        wandb_initialized = True
 
-    env, env_cfg = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg_preview)
-    ppo_runner, train_cfg, _ = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args)
+        env, env_cfg = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg_preview)
+        ppo_runner, train_cfg, _ = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args)
 
-    if args.rank == 0:
-        save_run_metadata(log_pth, args, env_cfg, train_cfg, filename=args.run_metadata_filename)
-        update_run_metadata(log_pth, {
-            "wandb": {
-                "entity": getattr(wandb.run, "entity", None),
-                "name": getattr(wandb.run, "name", None),
-                "project": getattr(wandb.run, "project", None),
-                "run_id": getattr(wandb.run, "id", None),
-                "url": getattr(wandb.run, "url", None),
-            }
-        }, filename=args.run_metadata_filename)
-        wandb.config.update(build_wandb_config(args, env_cfg, train_cfg, log_pth), allow_val_change=True)
-        task_config_path = os.path.join(LEGGED_GYM_ENVS_DIR, "manip_loco", f"{args.task}_config.py")
-        if os.path.isfile(task_config_path):
-            wandb.save(task_config_path, policy="now")
-        base_config_path = os.path.join(LEGGED_GYM_ENVS_DIR, "manip_loco", "manip_loco_base_config.py")
-        if os.path.isfile(base_config_path):
-            wandb.save(base_config_path, policy="now")
-        wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
-    ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
-    wandb.finish()
-    if args.distributed and dist.is_initialized():
-        dist.barrier()
-        dist.destroy_process_group()
+        if args.rank == 0:
+            save_run_metadata(log_pth, args, env_cfg, train_cfg, filename=args.run_metadata_filename)
+            update_run_metadata(log_pth, {
+                "wandb": {
+                    "entity": getattr(wandb.run, "entity", None),
+                    "name": getattr(wandb.run, "name", None),
+                    "project": getattr(wandb.run, "project", None),
+                    "run_id": getattr(wandb.run, "id", None),
+                    "url": getattr(wandb.run, "url", None),
+                }
+            }, filename=args.run_metadata_filename)
+            wandb.config.update(build_wandb_config(args, env_cfg, train_cfg, log_pth), allow_val_change=True)
+            task_config_path = os.path.join(LEGGED_GYM_ENVS_DIR, "manip_loco", f"{args.task}_config.py")
+            if os.path.isfile(task_config_path):
+                wandb.save(task_config_path, policy="now")
+            base_config_path = os.path.join(LEGGED_GYM_ENVS_DIR, "manip_loco", "manip_loco_base_config.py")
+            if os.path.isfile(base_config_path):
+                wandb.save(base_config_path, policy="now")
+            wandb.save(LEGGED_GYM_ENVS_DIR + "/manip_loco/manip_loco.py", policy="now")
+        ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
+    except KeyboardInterrupt as exc:
+        cancelled = True
+        print(f"Training cancelled: {exc}", file=sys.stderr)
+    finally:
+        safe_finish_wandb(wandb_initialized, cancelled)
+        safe_cleanup_distributed(cancelled)
+        restore_training_signal_handlers(previous_signal_handlers)
 
 if __name__ == '__main__':
     args = get_args()
