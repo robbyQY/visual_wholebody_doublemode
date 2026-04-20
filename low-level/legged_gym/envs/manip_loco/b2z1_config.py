@@ -8,8 +8,8 @@ from .manip_loco_base_config import ManipLocoRoughCfg, ManipLocoRoughCfgPPO
 
 class B2Z1RoughCfg(ManipLocoRoughCfg):
     class goal_ee(ManipLocoRoughCfg.goal_ee):
-        collision_upper_limits = [0.2, 0.2, 0.12]
-        collision_lower_limits = [-0.75, -0.2, -0.72]
+        collision_upper_limits = [0.5, 0.2, 0.12]
+        collision_lower_limits = [-0.35, -0.2, -0.72]
         underground_limit = -0.72
 
         class urdf_mount(ManipLocoRoughCfg.goal_ee.urdf_mount):
@@ -19,7 +19,7 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
             arm_shoulder_offset_z = 0.045
 
         class sphere_center(ManipLocoRoughCfg.goal_ee.sphere_center):
-            x_offset = 0.25
+            x_offset = 0.0
             y_offset = 0.0
             z_invariant_offset = 0.72
             mixed_height_reference = False

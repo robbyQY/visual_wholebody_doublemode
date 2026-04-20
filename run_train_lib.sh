@@ -472,11 +472,13 @@ cleanup_stale_jobs_locked() {
   local state
   local launcher_pid
   local train_pid
+  local cancel_requested_file
 
   shopt -s nullglob
   for job_dir in "${QUEUE_JOBS_DIR}"/*; do
     [[ -d "${job_dir}" ]] || continue
     state="$(read_file_or_empty "${job_dir}/state")"
+    cancel_requested_file="${job_dir}/cancel_requested"
     case "${state}" in
       queued)
         launcher_pid="$(read_file_or_empty "${job_dir}/launcher_pid")"
@@ -492,13 +494,21 @@ cleanup_stale_jobs_locked() {
         elif [[ -n "${launcher_pid}" ]] && kill -0 "${launcher_pid}" 2>/dev/null; then
           :
         else
-          printf 'failed\n' > "${job_dir}/state"
+          if [[ -f "${cancel_requested_file}" ]]; then
+            printf 'cancelled\n' > "${job_dir}/state"
+          else
+            printf 'failed\n' > "${job_dir}/state"
+          fi
         fi
         ;;
       running)
         train_pid="$(read_file_or_empty "${job_dir}/train_pid")"
         if [[ -z "${train_pid}" ]] || ! kill -0 "${train_pid}" 2>/dev/null; then
-          printf 'failed\n' > "${job_dir}/state"
+          if [[ -f "${cancel_requested_file}" ]]; then
+            printf 'cancelled\n' > "${job_dir}/state"
+          else
+            printf 'failed\n' > "${job_dir}/state"
+          fi
         fi
         ;;
     esac
@@ -736,6 +746,10 @@ run_queued_training_worker() {
     current_state="$(read_file_or_empty "${JOB_DIR}/state")"
     if [[ "${current_state}" != "queued" ]]; then
       release_queue_lock
+      if [[ "${current_state}" == "cancelled" ]]; then
+        log_line "Job ${JOB_ID} was cancelled before launch"
+        exit 0
+      fi
       log_line "Job ${JOB_ID} left queued state unexpectedly: ${current_state}"
       exit 1
     fi
@@ -832,7 +846,10 @@ run_queued_training_worker() {
   acquire_queue_lock
   printf '%s\n' "${train_exit_code}" > "${JOB_DIR}/exit_code"
   printf '%(%Y-%m-%d %H:%M:%S)T\n' -1 > "${JOB_DIR}/finished_at"
-  if (( train_exit_code == 0 )); then
+  current_state="$(read_file_or_empty "${JOB_DIR}/state")"
+  if [[ "${current_state}" == "cancelled" || -f "${JOB_DIR}/cancel_requested" ]]; then
+    printf 'cancelled\n' > "${JOB_DIR}/state"
+  elif (( train_exit_code == 0 )); then
     printf 'completed\n' > "${JOB_DIR}/state"
   else
     printf 'failed\n' > "${JOB_DIR}/state"

@@ -114,6 +114,32 @@ class BaseTask():
         self.camera_orbit_yaw_step = np.deg2rad(5.0)
         self.camera_orbit_pitch_step = np.deg2rad(5.0)
         self.camera_orbit_radius_step = 0.2
+        action_repeat_delay_s = getattr(
+            cfg.env,
+            "action_repeat_delay_s",
+            getattr(cfg.env, "teleop_key_repeat_delay_s", 0.35),
+        )
+        action_repeat_rate_hz = getattr(
+            cfg.env,
+            "action_repeat_rate_hz",
+            getattr(cfg.env, "teleop_key_repeat_rate_hz", 6.0),
+        )
+        self.action_repeat_delay_s = max(0.0, float(action_repeat_delay_s))
+        self.action_repeat_rate_hz = max(0.0, float(action_repeat_rate_hz))
+        self.action_repeat_period_s = (
+            1.0 / self.action_repeat_rate_hz if self.action_repeat_rate_hz > 0.0 else float("inf")
+        )
+        self.repeatable_actions = {
+            "prev_id",
+            "next_id",
+            "camera_orbit_left",
+            "camera_orbit_right",
+            "camera_orbit_up",
+            "camera_orbit_down",
+            "camera_orbit_zoom_in",
+            "camera_orbit_zoom_out",
+        }
+        self.held_actions = {}
 
     def subscribe_viewer_keyboard_events(self):
         self.gym.subscribe_viewer_keyboard_event(
@@ -277,43 +303,82 @@ class BaseTask():
         )
         self.lookat(self.lookat_id)
 
-    def handle_viewer_action_event(self, evt):
-        if evt.action == "QUIT" and evt.value > 0:
+    def _register_repeatable_actions(self, *actions):
+        self.repeatable_actions.update(actions)
+
+    def _update_held_action_state(self, action, value):
+        if action not in self.repeatable_actions:
+            return
+
+        if value <= 0:
+            self.held_actions.pop(action, None)
+            return
+
+        if action not in self.held_actions:
+            now = time.monotonic()
+            self.held_actions[action] = {
+                "next_repeat_time": now + self.action_repeat_delay_s,
+            }
+
+    def _apply_held_actions(self):
+        if not self.held_actions or self.action_repeat_rate_hz <= 0.0:
+            return
+
+        now = time.monotonic()
+        for action, state in list(self.held_actions.items()):
+            if now < state["next_repeat_time"]:
+                continue
+            self.handle_repeated_action(action)
+            state["next_repeat_time"] = now + self.action_repeat_period_s
+
+    def _apply_base_viewer_action(self, action):
+        if action == "QUIT":
             sys.exit()
-        elif evt.action == "toggle_viewer_sync" and evt.value > 0:
+        elif action == "toggle_viewer_sync":
             self.enable_viewer_sync = not self.enable_viewer_sync
-        elif evt.action == "reset_all" and evt.value > 0:
+            return True
+        elif action == "reset_all":
             self.request_manual_reset()
             print("[viewer] manual reset requested for all environments")
+            return True
 
         if not self.free_cam:
             for i in range(min(9, self.num_envs)):
-                if evt.action == "lookat" + str(i) and evt.value > 0:
+                if action == "lookat" + str(i):
                     self._reset_follow_yaw_anchor(i)
                     self.lookat(i)
                     self.lookat_id = i
-            if evt.action == "prev_id" and evt.value > 0:
+                    return True
+            if action == "prev_id":
                 self.lookat_id  = (self.lookat_id-1) % self.num_envs
                 self._reset_follow_yaw_anchor(self.lookat_id)
                 self.lookat(self.lookat_id)
-            if evt.action == "next_id" and evt.value > 0:
+                return True
+            if action == "next_id":
                 self.lookat_id  = (self.lookat_id+1) % self.num_envs
                 self._reset_follow_yaw_anchor(self.lookat_id)
                 self.lookat(self.lookat_id)
-            if evt.action == "camera_orbit_left" and evt.value > 0:
+                return True
+            if action == "camera_orbit_left":
                 self._orbit_camera(delta_yaw=-self.camera_orbit_yaw_step)
-            if evt.action == "camera_orbit_right" and evt.value > 0:
+                return True
+            if action == "camera_orbit_right":
                 self._orbit_camera(delta_yaw=self.camera_orbit_yaw_step)
-            if evt.action == "camera_orbit_up" and evt.value > 0:
+                return True
+            if action == "camera_orbit_up":
                 self._orbit_camera(delta_pitch=self.camera_orbit_pitch_step)
-            if evt.action == "camera_orbit_down" and evt.value > 0:
+                return True
+            if action == "camera_orbit_down":
                 self._orbit_camera(delta_pitch=-self.camera_orbit_pitch_step)
-            if evt.action == "camera_orbit_zoom_in" and evt.value > 0:
+                return True
+            if action == "camera_orbit_zoom_in":
                 self._orbit_camera(delta_radius=-self.camera_orbit_radius_step)
-            if evt.action == "camera_orbit_zoom_out" and evt.value > 0:
+                return True
+            if action == "camera_orbit_zoom_out":
                 self._orbit_camera(delta_radius=self.camera_orbit_radius_step)
-                    
-        if evt.action == "free_cam" and evt.value > 0:
+                return True
+
+        if action == "free_cam":
             self.free_cam = not self.free_cam
             if not self.free_cam:
                 # Re-enter follow mode from the current free-camera position so the
@@ -326,8 +391,9 @@ class BaseTask():
                     self.lookat_id,
                     yaw=self.lookat_follow_yaw,
                 )
+            return True
         
-        if evt.action == "pause" and evt.value > 0:
+        if action == "pause":
             self.pause = True
             while self.pause:
                 time.sleep(0.1)
@@ -335,9 +401,21 @@ class BaseTask():
                 for evt in self.gym.query_viewer_action_events(self.viewer):
                     if evt.action == "pause" and evt.value > 0:
                         self.pause = False
+            return True
+
+        return False
+
+    def handle_repeated_action(self, action):
+        return self._apply_base_viewer_action(action)
+
+    def handle_viewer_action_event(self, evt):
+        self._update_held_action_state(evt.action, evt.value)
+        if evt.value <= 0:
+            return
+        self._apply_base_viewer_action(evt.action)
 
     def on_viewer_events_processed(self):
-        pass
+        self._apply_held_actions()
 
     def render(self, sync_frame_time=True):
         if self.viewer:

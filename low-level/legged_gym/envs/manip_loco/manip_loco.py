@@ -1023,11 +1023,6 @@ class ManipLoco(LeggedRobot):
         self.teleop_saved_arm_joint_targets = self.teleop_arm_joint_pos_targets.clone()
         self.teleop_saved_gripper_dof_pos = self.gripper_pos_targets.clone()
         self.teleop_saved_gripper_pos_targets = self.gripper_pos_targets.clone()
-        self.teleop_key_repeat_delay_s = max(0.0, float(getattr(self.cfg.env, "teleop_key_repeat_delay_s", 0.35)))
-        self.teleop_key_repeat_rate_hz = max(0.0, float(getattr(self.cfg.env, "teleop_key_repeat_rate_hz", 6.0)))
-        self.teleop_key_repeat_period_s = (
-            1.0 / self.teleop_key_repeat_rate_hz if self.teleop_key_repeat_rate_hz > 0.0 else float("inf")
-        )
         self.teleop_repeatable_actions = {
             "forward",
             "reverse",
@@ -1048,7 +1043,7 @@ class ManipLoco(LeggedRobot):
             "open_gripper",
             "close_gripper",
         }
-        self.teleop_held_actions = {}
+        self._register_repeatable_actions(*self.teleop_repeatable_actions)
         self.arm_waist_idx = self.dof_names.index(self.cfg.asset.arm_waist_name)
         self.omnidirectional_init_pos_y_limits = torch.tensor(
             self.cfg.goal_ee.ranges.omnidirectional_init_pos_y,
@@ -1895,37 +1890,6 @@ class ManipLoco(LeggedRobot):
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "set_height_reference_invariant")
                 self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_T, "set_height_reference_follow")
 
-    def _update_teleop_held_action_state(self, action, value):
-        if action not in self.teleop_repeatable_actions:
-            return
-
-        if value <= 0:
-            self.teleop_held_actions.pop(action, None)
-            return
-
-        now = time.monotonic()
-        state = self.teleop_held_actions.get(action)
-        if state is None:
-            self.teleop_held_actions[action] = {
-                "press_time": now,
-                "next_repeat_time": now + self.teleop_key_repeat_delay_s,
-            }
-
-    def _apply_held_teleop_actions(self):
-        if not self.cfg.env.teleop_mode or not self.teleop_held_actions or self.teleop_key_repeat_rate_hz <= 0.0:
-            return
-
-        now = time.monotonic()
-        for action, state in list(self.teleop_held_actions.items()):
-            if now < state["next_repeat_time"]:
-                continue
-            self._apply_teleop_action(action)
-            state["next_repeat_time"] = now + self.teleop_key_repeat_period_s
-
-    def on_viewer_events_processed(self):
-        super().on_viewer_events_processed()
-        self._apply_held_teleop_actions()
-
     def _apply_teleop_action(self, action):
         if action == "stop_linear":
             self.teleop_raw_commands[:, 0] = 0
@@ -2063,9 +2027,16 @@ class ManipLoco(LeggedRobot):
                 self.goal_height_follow_mask[:] = True
                 print("[teleop] height reference mode: trunk-follow (obs bit = 1)")
 
+    def handle_repeated_action(self, action):
+        if super().handle_repeated_action(action):
+            return True
+        if not self.cfg.env.teleop_mode or action not in self.teleop_repeatable_actions:
+            return False
+        self._apply_teleop_action(action)
+        return True
+
     def handle_viewer_action_event(self, evt):
         super().handle_viewer_action_event(evt)
-        self._update_teleop_held_action_state(evt.action, evt.value)
 
         if evt.value <= 0:
             return
