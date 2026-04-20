@@ -3,13 +3,15 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-import numpy as np
-
 from .manip_loco_base_config import ManipLocoRoughCfg, ManipLocoRoughCfgPPO
 
 
 class B1Z1RoughCfg(ManipLocoRoughCfg):
     class goal_ee(ManipLocoRoughCfg.goal_ee):
+        collision_upper_limits = [0.1, 0.2, -0.05]
+        collision_lower_limits = [-0.8, -0.2, -0.7]
+        underground_limit = -0.7
+
         class urdf_mount(ManipLocoRoughCfg.goal_ee.urdf_mount):
             arm_base_offset = [0.3, 0.0, 0.09]
             mount_yaw_offset = 0.0
@@ -47,9 +49,6 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             "z1_wrist_rotate": 1.57,
             "z1_jointGripper": -0.785,
         }
-        rand_yaw_range = np.pi / 2
-        origin_perturb_range = 0.5
-        init_vel_perturb_range = 0.1
 
     class control(ManipLocoRoughCfg.control):
         stiffness = {
@@ -94,38 +93,36 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             "z1_wrist_rotate": 0.5,
             "z1_jointGripper": 0.5,
         }
-        adaptive_arm_gains = False
-        action_scale = [0.4, 0.45, 0.45] * 2 + [0.4, 0.45, 0.45] * 2 + [2.1, 0.6, 0.6, 0, 0, 0]
-        decimation = 4
-        torque_supervision = False
 
     class asset(ManipLocoRoughCfg.asset):
         file = "{LEGGED_GYM_ROOT_DIR}/resources/robots/b1z1/urdf/b1z1.urdf"
         base_name = "trunk"
-        foot_name = "foot"
         gripper_name = "ee_gripper_link"
         arm_waist_name = "z1_waist"
-        hip_joint_names = ["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"]
-        policy_leg_joint_names = [
-            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-        ]
-        policy_foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
         penalize_contacts_on = ["thigh", "trunk", "calf"]
-        terminate_after_contacts_on = []
         mount_urdf_generator = "b1z1"
-        self_collisions = 0
-        flip_visual_attachments = False
-        collapse_fixed_joints = True
-        fix_base_link = False
 
     class arm(ManipLocoRoughCfg.arm):
         init_target_ee_base = [0.2, 0.0, 0.2]
-        grasp_offset = 0.08
-        osc_kp = np.array([100, 100, 100, 30, 30, 30])
-        osc_kd = 2 * (osc_kp ** 0.5)
+
+    class domain_rand(ManipLocoRoughCfg.domain_rand):
+        observe_priv = True
+        randomize_friction = True
+        friction_range = [0.3, 3.0]
+        randomize_base_mass = True
+        added_mass_range = [0.0, 15.0]
+        randomize_base_com = True
+        added_com_range_x = [-0.15, 0.15]
+        added_com_range_y = [-0.15, 0.15]
+        added_com_range_z = [-0.15, 0.15]
+        randomize_motor = True
+        leg_motor_strength_range = [0.7, 1.3]
+        arm_motor_strength_range = [0.7, 1.3]
+        randomize_gripper_mass = True
+        gripper_added_mass_range = [0, 0.1]
+        push_robots = True
+        push_interval_s = 8
+        max_push_vel_xy = 0.5
 
     class rewards(ManipLocoRoughCfg.rewards):
         reward_scale_preset = "legacy"
@@ -140,62 +137,99 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
         crouch_calf_delta = -0.55
 
         class scales(ManipLocoRoughCfg.rewards.scales):
-            tracking_contacts_shaped_force = -2.0
-            tracking_contacts_shaped_vel = -2.0
-            feet_air_time = 2.0
-            feet_height = 1.0
-            tracking_lin_vel_max = 2.0
-            tracking_lin_vel_x_l1 = 0.0
-            tracking_lin_vel_x_exp = 0.0
-            tracking_ang_vel = 0.5
-            penalty_lin_vel_y = 0.0
-            stand_still = 1.0
-            stand_still_flexible = 0.0
-            walking_dof = 1.5
-            walking_dof_flexible = 0.0
-            alive = 1.0
-            lin_vel_z = -1.5
-            roll = -2.0
-            pitch = 0.0
-            hip_pos = -0.3
-            hip_pos_flexible = 0.0
-            base_height = -5.0
-            base_height_nominal = 0.0
-            base_height_band = 0.0
-            base_height_walking = 0.0
-            base_height_standing = 0.0
-            dof_default_pos = 0.0
-            dof_error = 0.0
-            orientation = 0.0
-            orientation_walking = 0.0
-            orientation_standing = 0.0
-            action_rate = -0.015
-            dof_acc = -7.5e-7
-            dof_pos_limits = -10.0
-            delta_torques = -1.0e-7 / 4.0
-            torques = -2.5e-5
-            torques_walking = 0.0
-            torques_standing = 0.0
-            work = 0.0
-            energy_square = 0.0
-            energy_square_walking = 0.0
-            energy_square_standing = 0.0
-            ang_vel_xy = -0.2
-            collision = -10.0
-            feet_jerk = -0.0002
-            feet_drag = -0.08
-            feet_contact_forces = -0.001
+            tracking_contacts_shaped_force = -2.0 # 惩罚摆动足触地力过大
+            tracking_contacts_shaped_vel = -2.0 # 惩罚支撑足滑动过快
+            feet_air_time = 2.0 # 奖励迈步腾空更久
+            feet_height = 1.0 # 惩罚摆腿抬脚不足
+            tracking_lin_vel_max = 2.0 # 奖励前向速度跟踪
+            tracking_lin_vel_x_l1 = 0.0 # 奖励前向速度贴近命令
+            tracking_lin_vel_x_exp = 0.0 # 奖励前向速度指数跟踪
+            tracking_ang_vel = 0.5 # 奖励偏航角速度跟踪
+            penalty_lin_vel_y = 0.0 # 惩罚侧向漂移速度
+            stand_still = 1.0 # 奖励静止时站稳
+            stand_still_flexible = 0.0 # 奖励静止时站稳（Height-flexible）
+            walking_dof = 1.5 # 奖励行走时关节规整
+            walking_dof_flexible = 0.0 # 奖励行走时关节规整（Height-flexible）
+            alive = 1.0 # 奖励回合持续存活
+            lin_vel_z = -1.5 # 惩罚机身上下晃动
+            roll = -2.0 # 惩罚机身横滚倾斜
+            pitch = 0.0 # 惩罚机身俯仰倾斜
+            hip_pos = -0.3 # 惩罚髋关节偏离默认
+            hip_pos_flexible = 0.0 # 惩罚髋关节偏离默认（Height-flexible）
+            base_height = -5.0 # 惩罚机身高度偏差
+            base_height_nominal = 0.0 # 在允许区间内弱偏好回到默认高度（Height-flexible）
+            base_height_band = 0.0 # 惩罚机身高度偏差（Height-flexible）
+            base_height_walking = 0.0 # 惩罚行走时机身高度偏差
+            base_height_standing = 0.0 # 惩罚站立时机身高度偏差
+            dof_default_pos = 0.0 # 奖励关节贴近默认位
+            dof_error = 0.0 # 惩罚关节默认位误差
+            orientation = 0.0 # 惩罚机身姿态倾斜
+            orientation_walking = 0.0 # 惩罚行走时姿态倾斜
+            orientation_standing = 0.0 # 惩罚站立时姿态倾斜
+            action_rate = -0.015 # 惩罚动作变化过快
+            dof_acc = -7.5e-7 # 惩罚关节加速度过大
+            dof_pos_limits = -10.0 # 惩罚关节逼近限位
+            delta_torques = -1.0e-7 / 4.0 # 惩罚扭矩突变过大
+            torques = -2.5e-5 # 惩罚关节扭矩过大
+            torques_walking = 0.0 # 惩罚行走时扭矩过大
+            torques_standing = 0.0 # 惩罚站立时扭矩过大
+            work = 0.0 # 惩罚腿部净做功大
+            energy_square = 0.0 # 惩罚腿部平方能耗
+            energy_square_walking = 0.0 # 惩罚行走时平方能耗
+            energy_square_standing = 0.0 # 惩罚站立时平方能耗
+            ang_vel_xy = -0.2 # 惩罚机身横俯角速度
+            collision = -10.0 # 惩罚机身发生碰撞
+            feet_jerk = -0.0002 # 惩罚足端冲击突变
+            feet_drag = -0.08 # 惩罚足端拖地滑动
+            feet_contact_forces = -0.001 # 惩罚足端接触力过大
+
+        class scale_presets(ManipLocoRoughCfg.rewards.scale_presets):
+            legacy = {
+                "stand_still": 1.0,
+                "walking_dof": 1.5,
+                "hip_pos": -0.3,
+                "base_height": -5.0,
+                "stand_still_flexible": 0.0,
+                "walking_dof_flexible": 0.0,
+                "pitch": 0.0,
+                "hip_pos_flexible": 0.0,
+                "base_height_nominal": 0.0,
+                "base_height_band": 0.0,
+                "orientation": 0.0,
+                "ang_vel_xy": -0.2,
+            }
+            height_flexible = {
+                "stand_still": 0.0,
+                "walking_dof": 0.0,
+                "hip_pos": 0.0,
+                "base_height": 0.0,
+                "stand_still_flexible": 1.0,
+                "walking_dof_flexible": 1.5,
+                "pitch": -2.0,
+                "hip_pos_flexible": -0.1,
+                "base_height_nominal": -0.25,
+                "base_height_band": -5.0,
+                "orientation": -6.0,
+                "ang_vel_xy": -0.4,
+            }
+
+        _selected_reward_scale_preset = getattr(scale_presets, reward_scale_preset, None)
+        if _selected_reward_scale_preset is None:
+            raise ValueError(f"Unsupported rewards.reward_scale_preset={reward_scale_preset}")
+        for _reward_name, _reward_scale in _selected_reward_scale_preset.items():
+            setattr(scales, _reward_name, _reward_scale)
+        del _selected_reward_scale_preset, _reward_name, _reward_scale
 
         class arm_scales(ManipLocoRoughCfg.rewards.arm_scales):
-            arm_termination = None
-            tracking_ee_sphere = 0.0
-            tracking_ee_world = 0.8
-            tracking_ee_sphere_walking = 0.0
-            tracking_ee_sphere_standing = 0.0
-            tracking_ee_cart = None
-            arm_energy_abs_sum = None
-            tracking_ee_orn = 0.0
-            tracking_ee_orn_ry = None
+            arm_termination = None # 惩罚机械臂回合终止
+            tracking_ee_sphere = 0.0 # 奖励末端球坐标跟踪
+            tracking_ee_world = 0.8 # 奖励末端世界坐标跟踪
+            tracking_ee_sphere_walking = 0.0 # 奖励行走时末端球坐标跟踪
+            tracking_ee_sphere_standing = 0.0 # 奖励站立时末端球坐标跟踪
+            tracking_ee_cart = None # 奖励末端笛卡尔跟踪
+            arm_energy_abs_sum = None # 惩罚机械臂能耗过大
+            tracking_ee_orn = 0.0 # 奖励末端姿态跟踪
+            tracking_ee_orn_ry = None # 奖励末端滚偏姿态跟踪
 
 
 class B1Z1RoughCfgPPO(ManipLocoRoughCfgPPO):

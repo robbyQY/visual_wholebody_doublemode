@@ -141,75 +141,51 @@ path = pathlib.Path(sys.argv[1])
 if not path.is_file():
     raise SystemExit(f"TASK_OPTIONS_CSV not found: {path}")
 
-column_aliases = {
-    "PROJ_NAME": "PROJ_NAME",
-    "proj_name": "PROJ_NAME",
-    "项目名": "PROJ_NAME",
+def normalize_column_name(name):
+    return name.strip().upper()
+
+raw_column_aliases = {
     "TASK": "TASK",
-    "task": "TASK",
     "任务": "TASK",
+    "MOUNT_DEG": "MOUNT_DEG",
+    "机械臂角度": "MOUNT_DEG",
+    "MOUNT_X": "MOUNT_X",
+    "机械臂安装X": "MOUNT_X",
+    "MOUNT_Y": "MOUNT_Y",
+    "机械臂安装Y": "MOUNT_Y",
     "TRAIN_MODE": "TRAIN_MODE",
-    "train_mode": "TRAIN_MODE",
     "训练模式": "TRAIN_MODE",
     "LOAD_EXPTID": "LOAD_EXPTID",
-    "load_exptid": "LOAD_EXPTID",
     "加载实验名": "LOAD_EXPTID",
     "LOAD_CKPT": "LOAD_CKPT",
-    "load_ckpt": "LOAD_CKPT",
     "加载检查点": "LOAD_CKPT",
     "MAX_ITERATIONS": "MAX_ITERATIONS",
-    "max_iterations": "MAX_ITERATIONS",
     "最大迭代数": "MAX_ITERATIONS",
     "NUM_ENVS": "NUM_ENVS",
-    "num_envs": "NUM_ENVS",
     "环境数": "NUM_ENVS",
     "REQUESTED_NUM_GPUS": "REQUESTED_NUM_GPUS",
-    "requested_num_gpus": "REQUESTED_NUM_GPUS",
-    "gpu张数": "REQUESTED_NUM_GPUS",
     "GPU张数": "REQUESTED_NUM_GPUS",
-    "TRAIN_LOG_EVERY": "TRAIN_LOG_EVERY",
-    "train_log_every": "TRAIN_LOG_EVERY",
-    "训练日志间隔": "TRAIN_LOG_EVERY",
-    "WANDB_GROUP": "WANDB_GROUP",
-    "wandb_group": "WANDB_GROUP",
-    "wandb组别": "WANDB_GROUP",
-    "wandb分组": "WANDB_GROUP",
-    "group": "WANDB_GROUP",
     "EE_GOAL_OBS_MODE": "EE_GOAL_OBS_MODE",
-    "ee_goal_obs_mode": "EE_GOAL_OBS_MODE",
     "末端目标观测模式": "EE_GOAL_OBS_MODE",
     "REWARD_SCALE_PRESET": "REWARD_SCALE_PRESET",
-    "reward_scale_preset": "REWARD_SCALE_PRESET",
     "奖励预设": "REWARD_SCALE_PRESET",
     "OBSERVE_GAIT_COMMANDS": "OBSERVE_GAIT_COMMANDS",
-    "observe_gait_commands": "OBSERVE_GAIT_COMMANDS",
     "观察步态指令": "OBSERVE_GAIT_COMMANDS",
     "MIXED_HEIGHT_REFERENCE": "MIXED_HEIGHT_REFERENCE",
-    "mixed_height_reference": "MIXED_HEIGHT_REFERENCE",
     "混合高度参考": "MIXED_HEIGHT_REFERENCE",
     "TRUNK_FOLLOW_RATIO": "TRUNK_FOLLOW_RATIO",
-    "trunk_follow_ratio": "TRUNK_FOLLOW_RATIO",
     "机体系比例": "TRUNK_FOLLOW_RATIO",
     "OMNIDIRECTIONAL_POS_Y": "OMNIDIRECTIONAL_POS_Y",
-    "omnidirectional_pos_y": "OMNIDIRECTIONAL_POS_Y",
     "全向采样": "OMNIDIRECTIONAL_POS_Y",
-    "MOUNT_DEG": "MOUNT_DEG",
-    "mount_deg": "MOUNT_DEG",
-    "MOUNT_X": "MOUNT_X",
-    "mount_x": "MOUNT_X",
-    "MOUNT_Y": "MOUNT_Y",
-    "mount_y": "MOUNT_Y",
-    "MOUNT_Z": "MOUNT_Z",
-    "mount_z": "MOUNT_Z",
-    "机械臂角度": "MOUNT_DEG",
     "ENABLE_DYNAMIC_GAIT_FREQUENCY": "ENABLE_DYNAMIC_GAIT_FREQUENCY",
-    "enable_dynamic_gait_frequency": "ENABLE_DYNAMIC_GAIT_FREQUENCY",
     "动态步频": "ENABLE_DYNAMIC_GAIT_FREQUENCY",
     "DISABLE_WANDB": "DISABLE_WANDB",
-    "disable_wandb": "DISABLE_WANDB",
     "关闭wandb": "DISABLE_WANDB",
+    "WANDB_GROUP": "WANDB_GROUP",
+    "wandb组别": "WANDB_GROUP",
 }
-allowed_columns = sorted(set(column_aliases.values()))
+column_aliases = {normalize_column_name(key): value for key, value in raw_column_aliases.items()}
+allowed_columns = sorted(set(raw_column_aliases.values()))
 
 with path.open("r", encoding="utf-8-sig", newline="") as f:
     filtered_lines = [
@@ -224,8 +200,12 @@ reader = csv.DictReader(filtered_lines)
 if reader.fieldnames is None:
     raise SystemExit(f"TASK_OPTIONS_CSV must contain a header row: {path}")
 
-normalized_fieldnames = [field.strip() for field in reader.fieldnames]
-unknown_columns = [field for field in normalized_fieldnames if field and field not in column_aliases]
+normalized_fieldnames = [normalize_column_name(field) for field in reader.fieldnames]
+unknown_columns = [
+    field.strip()
+    for field, normalized_field in zip(reader.fieldnames, normalized_fieldnames)
+    if normalized_field and normalized_field not in column_aliases
+]
 if unknown_columns:
     raise SystemExit(
         "Unsupported TASK_OPTIONS_CSV columns: "
@@ -238,7 +218,7 @@ row_index = 0
 for row_index, row in enumerate(reader, start=1):
     assignments = [f"CSV_ROW_INDEX={row_index}"]
     for raw_key, raw_value in row.items():
-        input_key = raw_key.strip()
+        input_key = normalize_column_name(raw_key)
         if not input_key:
             continue
         key = column_aliases[input_key]
@@ -310,7 +290,6 @@ normalize_current_train_config() {
   validate_optional_number "${NUM_ENVS}" "NUM_ENVS"
   validate_optional_number "${MOUNT_X}" "MOUNT_X"
   validate_optional_number "${MOUNT_Y}" "MOUNT_Y"
-  validate_optional_number "${MOUNT_Z}" "MOUNT_Z"
 
   if [[ "${TRAIN_MODE}" == "load" && -z "${LOAD_EXPTID}" ]]; then
     run_train_die "LOAD_EXPTID must be set when TRAIN_MODE=load"
@@ -393,9 +372,6 @@ build_train_args() {
   fi
   if [[ -n "${MOUNT_Y}" ]]; then
     TRAIN_ARGS+=(--mount_y "${MOUNT_Y}")
-  fi
-  if [[ -n "${MOUNT_Z}" ]]; then
-    TRAIN_ARGS+=(--mount_z "${MOUNT_Z}")
   fi
 }
 
@@ -654,7 +630,6 @@ write_job_metadata_file() {
     printf 'MOUNT_DEG=%q\n' "${MOUNT_DEG}"
     printf 'MOUNT_X=%q\n' "${MOUNT_X}"
     printf 'MOUNT_Y=%q\n' "${MOUNT_Y}"
-    printf 'MOUNT_Z=%q\n' "${MOUNT_Z}"
     printf 'ENABLE_DYNAMIC_GAIT_FREQUENCY=%q\n' "${ENABLE_DYNAMIC_GAIT_FREQUENCY}"
     write_array_declaration TRAIN_ARGS "${TRAIN_ARGS[@]}"
   } > "${metadata_file}"
