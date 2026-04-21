@@ -24,13 +24,13 @@ class ManipLoco_rewards:
         for dof_idx, dof_name in enumerate(self.env.dof_names[:12]):
             if "hip" in dof_name:
                 crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_hip_delta
-                tiptoe_ref[dof_idx] += getattr(self.env.cfg.rewards, "tiptoe_hip_delta", 0.0)
+                tiptoe_ref[dof_idx] += self.env.cfg.rewards.tiptoe_hip_delta
             elif "thigh" in dof_name:
                 crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_thigh_delta
-                tiptoe_ref[dof_idx] += getattr(self.env.cfg.rewards, "tiptoe_thigh_delta", 0.0)
+                tiptoe_ref[dof_idx] += self.env.cfg.rewards.tiptoe_thigh_delta
             elif "calf" in dof_name:
                 crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_calf_delta
-                tiptoe_ref[dof_idx] += getattr(self.env.cfg.rewards, "tiptoe_calf_delta", 0.0)
+                tiptoe_ref[dof_idx] += self.env.cfg.rewards.tiptoe_calf_delta
 
         base_height = self._get_base_height()
         stand_height = float(self.env.cfg.rewards.base_height_target)
@@ -43,7 +43,7 @@ class ManipLoco_rewards:
             crouch_alpha.unsqueeze(1),
         )
 
-        tiptoe_height = float(getattr(self.env.cfg.rewards, "base_height_target_max", stand_height))
+        tiptoe_height = float(self.env.cfg.rewards.base_height_target_max)
         tiptoe_span = max(tiptoe_height - stand_height, 1e-6)
         tiptoe_alpha = ((base_height - stand_height) / tiptoe_span).clamp(0.0, 1.0)
         upper_ref = torch.lerp(

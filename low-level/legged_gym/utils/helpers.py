@@ -42,6 +42,7 @@ from isaacgym import gymutil
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from .b1z1_mount import ensure_mount_urdf, mount_deg_to_rad, normalize_mount_deg, normalize_mount_xyz
+from .collision_visual_urdf import ensure_collision_visual_urdf
 
 RUN_METADATA_FILENAME = "run_metadata.json"
 CHECKPOINT_FEATURE_NAMES = (
@@ -568,6 +569,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.teleop_mode = True
         if args.teleop_input_regularization:
             env_cfg.env.teleop_input_regularization = True
+        if args.viewer_display_mode is not None:
+            env_cfg.asset.visual_mode = args.viewer_display_mode
         if args.action_delay_mode is not None:
             env_cfg.env.action_delay_mode = args.action_delay_mode
         if args.ee_goal_obs_mode is not None:
@@ -634,6 +637,12 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
                         urdf_mount_cfg.arm_base_offset,
                     )
                     env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
+        if getattr(env_cfg.asset, "visual_mode", "mesh") == "collision":
+            collision_visual_asset_path = ensure_collision_visual_urdf(
+                env_cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR),
+                use_capsule_for_cylinders=getattr(env_cfg.asset, "replace_cylinder_with_capsule", False),
+            )
+            env_cfg.asset.file = collision_visual_asset_path
         lin_vel_x_min_schedule = _parse_schedule_arg(args.lin_vel_x_min_schedule)
         if lin_vel_x_min_schedule is not None:
             env_cfg.commands.lin_vel_x_min_schedule = lin_vel_x_min_schedule
@@ -752,6 +761,7 @@ def get_args(test=False):
         {"name": "--record_video", "action": "store_true", "default": False,  "help": "Record video to play"},
         {"name": "--teleop_mode", "action": "store_true", "default": False,  "help": "Enable keyboard teleoperation mode"},
         {"name": "--teleop_input_regularization", "action": "store_true", "default": False, "help": "Preprocess teleop raw commands and arm targets before feeding the policy/control stack"},
+        {"name": "--viewer_display_mode", "type": str, "choices": ["mesh", "collision"], "help": "Startup-only robot display mode. collision generates a derived URDF whose visual geometry matches collision shapes, without changing collision/inertial data or simulation dynamics."},
         {"name": "--action_delay_mode", "type": str, "choices": ["auto", "undelayed", "delayed"], "help": "Action delay mode for play/teleop: auto keeps the training switch, undelayed always uses the latest action, delayed always uses a one-step delayed action."},
         {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
         {"name": "--reward_scale_preset", "type": str, "choices": ["legacy", "height_flexible"], "help": "Reward scale preset used to populate rewards.scales for training/playback."},

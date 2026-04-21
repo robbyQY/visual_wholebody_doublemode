@@ -73,6 +73,7 @@ CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
 SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 
 HEADLESS=false
+VIEWER_DISPLAY_MODE="mesh"  # mesh | collision；只影响viewer显示，不影响实际动力学
 TELEOP_INPUT_REGULARIZATION=false
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
 EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
@@ -91,8 +92,10 @@ python "manip_loco_interface.py" \
   --sim_device "cuda:${GPU_ID}" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
+  $([[ "${HEADLESS}" == false ]] && echo --viewer_display_mode "${VIEWER_DISPLAY_MODE}") \
   --teleop_mode \
   $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
   $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)
+

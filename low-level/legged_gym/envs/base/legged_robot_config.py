@@ -98,6 +98,7 @@ class LeggedRobotCfg(BaseConfig):
 
     class asset:
         file = ""
+        visual_mode = "mesh"  # mesh | collision
         foot_name = "None" # name of the feet bodies, used to index body state and contact force tensors
         penalize_contacts_on = []
         terminate_after_contacts_on = []

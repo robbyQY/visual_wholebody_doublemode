@@ -37,6 +37,7 @@ CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
 SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 
 HEADLESS=false
+VIEWER_DISPLAY_MODE="mesh"  # mesh | collision；只影响viewer显示，不影响实际动力学
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
 EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
 CURRICULUM_ITER=""  # empty (start from curriculum step 0) | e.g. 3000
@@ -57,6 +58,7 @@ python "play.py" \
   --sim_device "cuda:${GPU_ID}" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
+  $([[ "${HEADLESS}" == false ]] && echo --viewer_display_mode "${VIEWER_DISPLAY_MODE}") \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
   $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \

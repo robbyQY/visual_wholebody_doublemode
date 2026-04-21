@@ -98,11 +98,7 @@ class BaseTask():
 
         # if running with a viewer, set up keyboard shortcuts and camera
         if self.headless == False:
-            # subscribe to keyboard shortcuts
-            self.viewer = self.gym.create_viewer(
-                self.sim, gymapi.CameraProperties())
-            
-            self.subscribe_viewer_keyboard_events()
+            self._create_viewer()
 
         self.free_cam = False
         self.lookat_id = 0
@@ -140,6 +136,11 @@ class BaseTask():
             "camera_orbit_zoom_out",
         }
         self.held_actions = {}
+
+    def _create_viewer(self):
+        camera_props = gymapi.CameraProperties()
+        self.viewer = self.gym.create_viewer(self.sim, camera_props)
+        self.subscribe_viewer_keyboard_events()
 
     def subscribe_viewer_keyboard_events(self):
         self.gym.subscribe_viewer_keyboard_event(
@@ -397,7 +398,7 @@ class BaseTask():
             self.pause = True
             while self.pause:
                 time.sleep(0.1)
-                self.gym.draw_viewer(self.viewer, self.sim, True)
+                self._draw_viewer()
                 for evt in self.gym.query_viewer_action_events(self.viewer):
                     if evt.action == "pause" and evt.value > 0:
                         self.pause = False
@@ -416,6 +417,13 @@ class BaseTask():
 
     def on_viewer_events_processed(self):
         self._apply_held_actions()
+
+    def _draw_viewer(self):
+        self.gym.draw_viewer(
+            self.viewer,
+            self.sim,
+            False,
+        )
 
     def render(self, sync_frame_time=True):
         if self.viewer:
@@ -437,7 +445,7 @@ class BaseTask():
             # step graphics
             if self.enable_viewer_sync:
                 self.gym.step_graphics(self.sim)
-                self.gym.draw_viewer(self.viewer, self.sim, True)
+                self._draw_viewer()
                 if sync_frame_time:
                     self.gym.sync_frame_time(self.sim)
             else:

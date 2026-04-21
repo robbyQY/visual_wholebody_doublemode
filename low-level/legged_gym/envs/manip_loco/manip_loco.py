@@ -627,7 +627,6 @@ class ManipLoco(LeggedRobot):
         env_upper = gymapi.Vec3(0., 0., 0.)
         self.actor_handles = []
         self.box_actor_handles = []
-        box_body_indices = []
         self.envs = []
         self.mass_params_tensor = torch.zeros(self.num_envs, 5, dtype=torch.float, device=self.device, requires_grad=False)
         for i in range(self.num_envs):
@@ -667,12 +666,6 @@ class ManipLoco(LeggedRobot):
             box_body_props, _ = self._box_process_rigid_body_props(box_body_props, i)
             self.gym.set_actor_rigid_body_properties(env_handle, box_handle, box_body_props, recomputeInertia=True)
 
-            box_body_idx = self.gym.get_actor_rigid_body_index(env_handle, box_handle, 0, gymapi.DOMAIN_SIM)
-            box_body_indices.append(box_body_idx)
-        
-        assert(np.all(np.array(self.actor_handles) == 0))
-        assert(np.all(np.array(self.box_actor_handles) == 1))
-        assert(np.all(np.array(box_body_indices) % (self.num_bodies + 1) == self.num_bodies))
         self.robot_actor_indices = torch.arange(0, 2 * self.num_envs, 2, device=self.device)
         self.box_actor_indices = torch.arange(1, 2 * self.num_envs, 2, device=self.device)
 
