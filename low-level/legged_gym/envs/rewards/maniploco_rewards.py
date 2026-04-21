@@ -9,28 +9,49 @@ class ManipLoco_rewards:
         self.env = env
 
     def _get_base_height(self):
-        return self.env.root_states[:, 2]
+        # Use terrain-relative base height so flexible posture rewards remain
+        # self-consistent on rough terrain where each environment has its own
+        # origin z offset.
+        env_origin_z = getattr(self.env, "env_origins", None)
+        if env_origin_z is None:
+            return self.env.root_states[:, 2]
+        return self.env.root_states[:, 2] - env_origin_z[:, 2]
 
     def _get_height_conditioned_leg_reference(self):
         stand_ref = self.env.default_dof_pos[:12]
         crouch_ref = stand_ref.clone()
+        tiptoe_ref = stand_ref.clone()
         for dof_idx, dof_name in enumerate(self.env.dof_names[:12]):
             if "hip" in dof_name:
                 crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_hip_delta
+                tiptoe_ref[dof_idx] += getattr(self.env.cfg.rewards, "tiptoe_hip_delta", 0.0)
             elif "thigh" in dof_name:
                 crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_thigh_delta
+                tiptoe_ref[dof_idx] += getattr(self.env.cfg.rewards, "tiptoe_thigh_delta", 0.0)
             elif "calf" in dof_name:
                 crouch_ref[dof_idx] += self.env.cfg.rewards.crouch_calf_delta
+                tiptoe_ref[dof_idx] += getattr(self.env.cfg.rewards, "tiptoe_calf_delta", 0.0)
 
-        stand_height = float(self.env.cfg.rewards.posture_reference_stand_height)
-        crouch_height = float(self.env.cfg.rewards.posture_reference_crouch_height)
-        height_span = max(stand_height - crouch_height, 1e-6)
-        alpha = ((stand_height - self._get_base_height()) / height_span).clamp(0.0, 1.0)
-        return torch.lerp(
+        base_height = self._get_base_height()
+        stand_height = float(self.env.cfg.rewards.base_height_target)
+        crouch_height = float(self.env.cfg.rewards.base_height_target_min)
+        crouch_span = max(stand_height - crouch_height, 1e-6)
+        crouch_alpha = ((stand_height - base_height) / crouch_span).clamp(0.0, 1.0)
+        lower_ref = torch.lerp(
             stand_ref.unsqueeze(0).expand(self.env.num_envs, -1),
             crouch_ref.unsqueeze(0).expand(self.env.num_envs, -1),
-            alpha.unsqueeze(1),
+            crouch_alpha.unsqueeze(1),
         )
+
+        tiptoe_height = float(getattr(self.env.cfg.rewards, "base_height_target_max", stand_height))
+        tiptoe_span = max(tiptoe_height - stand_height, 1e-6)
+        tiptoe_alpha = ((base_height - stand_height) / tiptoe_span).clamp(0.0, 1.0)
+        upper_ref = torch.lerp(
+            stand_ref.unsqueeze(0).expand(self.env.num_envs, -1),
+            tiptoe_ref.unsqueeze(0).expand(self.env.num_envs, -1),
+            tiptoe_alpha.unsqueeze(1),
+        )
+        return torch.where((base_height <= stand_height).unsqueeze(1), lower_ref, upper_ref)
 
     def _get_leg_posture_tracking_reward(self):
         ref = self._get_height_conditioned_leg_reference()

@@ -27,6 +27,8 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
             trunk_follow_anchor = "arm_waist"
 
     class init_state(ManipLocoRoughCfg.init_state):
+        # URDF-backed nominal stance: thigh=0.800, calf=-1.500 gives a
+        # geometric contact height of ~0.516 m, so keep the historical 0.500 m spawn.
         pos = [0.0, 0.0, 0.5]
         default_joint_angles = {
             "FL_hip_joint": 0.2,
@@ -128,13 +130,14 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
         reward_scale_preset = "legacy"
         base_height_target = 0.55
         base_height_target_min = 0.3
-        base_height_target_max = 0.7
-        posture_reference_stand_height = 0.55
-        posture_reference_crouch_height = 0.35
+        base_height_target_max = 0.67
         leg_posture_exp_scale = 0.05
         crouch_hip_delta = 0.0
         crouch_thigh_delta = 0.35
         crouch_calf_delta = -0.55
+        tiptoe_hip_delta = 0.0
+        tiptoe_thigh_delta = -0.5565
+        tiptoe_calf_delta = 0.8995
 
         class scales(ManipLocoRoughCfg.rewards.scales):
             tracking_contacts_shaped_force = -2.0 # 惩罚摆动足触地力过大

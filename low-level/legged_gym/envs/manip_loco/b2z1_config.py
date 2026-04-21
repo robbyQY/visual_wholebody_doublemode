@@ -21,25 +21,27 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
         class sphere_center(ManipLocoRoughCfg.goal_ee.sphere_center):
             x_offset = 0.0
             y_offset = 0.0
-            z_invariant_offset = 0.72
+            z_invariant_offset = 0.705
             mixed_height_reference = False
             trunk_follow_ratio = 0.5
             trunk_follow_anchor = "arm_waist"
 
     class init_state(ManipLocoRoughCfg.init_state):
-        pos = [0.0, 0.0, 0.60]
+        # URDF-backed nominal stance: thigh=0.735, calf=-1.500 gives a
+        # geometric contact height of ~0.510 m, so spawn 2 mm above that.
+        pos = [0.0, 0.0, 0.512]
         default_joint_angles = {
             "FL_hip_joint": 0.2,
-            "FL_thigh_joint": 0.8,
+            "FL_thigh_joint": 0.735,
             "FL_calf_joint": -1.5,
             "FR_hip_joint": -0.2,
-            "FR_thigh_joint": 0.8,
+            "FR_thigh_joint": 0.735,
             "FR_calf_joint": -1.5,
             "RL_hip_joint": 0.2,
-            "RL_thigh_joint": 0.8,
+            "RL_thigh_joint": 0.735,
             "RL_calf_joint": -1.5,
             "RR_hip_joint": -0.2,
-            "RR_thigh_joint": 0.8,
+            "RR_thigh_joint": 0.735,
             "RR_calf_joint": -1.5,
             "joint1": 0.0,
             "joint2": 1.48,
@@ -126,15 +128,16 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
 
     class rewards(ManipLocoRoughCfg.rewards):
         reward_scale_preset = "legacy"
-        base_height_target = 0.58
-        base_height_target_min = 0.33
-        base_height_target_max = 0.75
-        posture_reference_stand_height = 0.58
-        posture_reference_crouch_height = 0.38
+        base_height_target = 0.51015
+        base_height_target_min = 0.42005
+        base_height_target_max = 0.55997
         leg_posture_exp_scale = 0.05
         crouch_hip_delta = 0.0
-        crouch_thigh_delta = 0.35
-        crouch_calf_delta = -0.55
+        crouch_thigh_delta = 0.1785
+        crouch_calf_delta = -0.35375
+        tiptoe_hip_delta = 0.0
+        tiptoe_thigh_delta = -0.114875
+        tiptoe_calf_delta = 0.2275
 
         class scales(ManipLocoRoughCfg.rewards.scales):
             tracking_contacts_shaped_force = -2.0 # 惩罚摆动足触地力过大
