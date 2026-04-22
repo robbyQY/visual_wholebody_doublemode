@@ -27,22 +27,23 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
             trunk_follow_anchor = "arm_waist"
 
     class init_state(ManipLocoRoughCfg.init_state):
-        # URDF-backed nominal stance: thigh=0.735, calf=-1.500 gives a
-        # geometric contact height of ~0.510 m, so spawn 2 mm above that.
-        pos = [0.0, 0.0, 0.512]
+        # Keep B2 a touch more open-kneed than before so the default stance is
+        # less crouched and the nominal base-height reference sits closer to
+        # the resulting contact geometry.
+        pos = [0.0, 0.0, 0.535]
         default_joint_angles = {
             "FL_hip_joint": 0.2,
-            "FL_thigh_joint": 0.735,
-            "FL_calf_joint": -1.5,
+            "FL_thigh_joint": 0.70,
+            "FL_calf_joint": -1.35,
             "FR_hip_joint": -0.2,
-            "FR_thigh_joint": 0.735,
-            "FR_calf_joint": -1.5,
+            "FR_thigh_joint": 0.70,
+            "FR_calf_joint": -1.35,
             "RL_hip_joint": 0.2,
-            "RL_thigh_joint": 0.735,
-            "RL_calf_joint": -1.5,
+            "RL_thigh_joint": 0.70,
+            "RL_calf_joint": -1.35,
             "RR_hip_joint": -0.2,
-            "RR_thigh_joint": 0.735,
-            "RR_calf_joint": -1.5,
+            "RR_thigh_joint": 0.70,
+            "RR_calf_joint": -1.35,
             "joint1": 0.0,
             "joint2": 1.48,
             "joint3": -0.63,
@@ -136,9 +137,12 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
 
     class rewards(ManipLocoRoughCfg.rewards):
         reward_scale_preset = "legacy"
-        base_height_target = 0.51015
-        base_height_target_min = 0.42005
-        base_height_target_max = 0.55997
+        base_height_target = 0.535
+        base_height_target_min = 0.34
+        base_height_target_max = 0.66
+        max_contact_force = 55.0
+        gait_vel_sigma = 0.75
+        gait_force_sigma = 0.75
         leg_posture_exp_scale = 0.05
         crouch_hip_delta = 0.0
         crouch_thigh_delta = 0.1785

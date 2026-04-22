@@ -1232,66 +1232,59 @@ class ManipLoco(LeggedRobot):
             self.gait_indices = torch.remainder(self.gait_indices + self.dt * frequencies, 1.0)
             self.gait_indices[~walking_mask] = 0
 
-            foot_indices = [self.gait_indices + phases + offsets + bounds,
-                            self.gait_indices + offsets,
-                            self.gait_indices + bounds,
-                            self.gait_indices + phases]
+            canonical_foot_indices = {
+                "FL_foot": self.gait_indices + phases + offsets + bounds,
+                "FR_foot": self.gait_indices + offsets,
+                "RL_foot": self.gait_indices + bounds,
+                "RR_foot": self.gait_indices + phases,
+            }
+            policy_foot_names = list(self.cfg.asset.policy_foot_names)
+            raw_foot_indices = {
+                foot_name: torch.remainder(canonical_foot_indices[foot_name], 1.0)
+                for foot_name in policy_foot_names
+            }
 
-            self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
+            self.foot_indices = torch.cat(
+                [raw_foot_indices[foot_name].unsqueeze(1) for foot_name in policy_foot_names],
+                dim=1,
+            )
 
-            for idxs in foot_indices:
+            shaped_foot_indices = {}
+            for foot_name, base_indices in canonical_foot_indices.items():
+                idxs = base_indices.clone()
                 stance_idxs = torch.remainder(idxs, 1) < durations
                 swing_idxs = torch.remainder(idxs, 1) > durations
 
                 idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (0.5 / durations)
                 idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - durations) * (
                             0.5 / (1 - durations))
+                shaped_foot_indices[foot_name] = idxs
 
-            self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
-            self.clock_inputs[:, 1] = torch.sin(2 * np.pi * foot_indices[1])
-            self.clock_inputs[:, 2] = torch.sin(2 * np.pi * foot_indices[2])
-            self.clock_inputs[:, 3] = torch.sin(2 * np.pi * foot_indices[3])
+            for i, foot_name in enumerate(policy_foot_names):
+                idxs = shaped_foot_indices[foot_name]
+                self.clock_inputs[:, i] = torch.sin(2 * np.pi * idxs)
+                self.doubletime_clock_inputs[:, i] = torch.sin(4 * np.pi * idxs)
+                self.halftime_clock_inputs[:, i] = torch.sin(np.pi * idxs)
 
-            self.doubletime_clock_inputs[:, 0] = torch.sin(4 * np.pi * foot_indices[0])
-            self.doubletime_clock_inputs[:, 1] = torch.sin(4 * np.pi * foot_indices[1])
-            self.doubletime_clock_inputs[:, 2] = torch.sin(4 * np.pi * foot_indices[2])
-            self.doubletime_clock_inputs[:, 3] = torch.sin(4 * np.pi * foot_indices[3])
-
-            self.halftime_clock_inputs[:, 0] = torch.sin(np.pi * foot_indices[0])
-            self.halftime_clock_inputs[:, 1] = torch.sin(np.pi * foot_indices[1])
-            self.halftime_clock_inputs[:, 2] = torch.sin(np.pi * foot_indices[2])
-            self.halftime_clock_inputs[:, 3] = torch.sin(np.pi * foot_indices[3])
+            def _compute_smoothing_multiplier(idxs):
+                phase = torch.remainder(idxs, 1.0)
+                return (
+                    smoothing_cdf_start(phase) * (1 - smoothing_cdf_start(phase - 0.5))
+                    + smoothing_cdf_start(phase - 1) * (1 - smoothing_cdf_start(phase - 1.5))
+                )
 
             # von mises distribution
             kappa = self.cfg.rewards.kappa_gait_probs
             smoothing_cdf_start = torch.distributions.normal.Normal(0,
                                                                     kappa).cdf  # (x) + torch.distributions.normal.Normal(1, kappa).cdf(x)) / 2
 
-            smoothing_multiplier_FL = (smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0)) * (
-                    1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5)) +
-                                       smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 1) * (
-                                               1 - smoothing_cdf_start(
-                                           torch.remainder(foot_indices[0], 1.0) - 0.5 - 1)))
-            smoothing_multiplier_FR = (smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0)) * (
-                    1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5)) +
-                                       smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 1) * (
-                                               1 - smoothing_cdf_start(
-                                           torch.remainder(foot_indices[1], 1.0) - 0.5 - 1)))
-            smoothing_multiplier_RL = (smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0)) * (
-                    1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5)) +
-                                       smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 1) * (
-                                               1 - smoothing_cdf_start(
-                                           torch.remainder(foot_indices[2], 1.0) - 0.5 - 1)))
-            smoothing_multiplier_RR = (smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0)) * (
-                    1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5)) +
-                                       smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 1) * (
-                                               1 - smoothing_cdf_start(
-                                           torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
+            smoothing_multipliers = {
+                foot_name: _compute_smoothing_multiplier(shaped_foot_indices[foot_name])
+                for foot_name in policy_foot_names
+            }
 
-            self.desired_contact_states[:, 0] = smoothing_multiplier_FL
-            self.desired_contact_states[:, 1] = smoothing_multiplier_FR
-            self.desired_contact_states[:, 2] = smoothing_multiplier_RL
-            self.desired_contact_states[:, 3] = smoothing_multiplier_RR
+            for i, foot_name in enumerate(policy_foot_names):
+                self.desired_contact_states[:, i] = smoothing_multipliers[foot_name]
 
     def _get_gait_frequencies(self):
         min_frequency = float(self.cfg.env.gait_frequency_min)

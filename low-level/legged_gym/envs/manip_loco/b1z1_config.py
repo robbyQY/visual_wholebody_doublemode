@@ -139,6 +139,9 @@ class B1Z1RoughCfg(ManipLocoRoughCfg):
         base_height_target = 0.55
         base_height_target_min = 0.3
         base_height_target_max = 0.67
+        max_contact_force = 40.0
+        gait_vel_sigma = 0.5
+        gait_force_sigma = 0.5
         leg_posture_exp_scale = 0.05
         crouch_hip_delta = 0.0
         crouch_thigh_delta = 0.35
