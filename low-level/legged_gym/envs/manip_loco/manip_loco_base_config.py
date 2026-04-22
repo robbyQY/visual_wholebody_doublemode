@@ -164,14 +164,6 @@ class ManipLocoRoughCfg(LeggedRobotCfg):
 
     class asset(LeggedRobotCfg.asset):
         foot_name = "foot"
-        hip_joint_names = ["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"]
-        policy_leg_joint_names = [
-            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-        ]
-        policy_foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
         terminate_after_contacts_on = []
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False

@@ -9,7 +9,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963267948966 0 0" />
       <geometry>
-        <mesh filename="../meshes/base_link.dae" />
+        <mesh filename="../meshes/base_link_no_lidar.dae" />
       </geometry>
       <material name="磨砂铝合金_011-effect"><color rgba="0.74876 0.74876 0.74876 1" /></material><material name="logo_001-effect"><color rgba="1 1 1 1" /></material><material name="材质_023-effect"><color rgba="0 0 0 1" /></material><material name="材质_024-effect"><color rgba="0.002853 0.002853 0.002853 1" /></material></visual>
     <collision>
@@ -650,7 +650,7 @@
     <axis xyz="0 0 0" />
   </joint>
   <joint name="z1_mount_joint" type="fixed">
-    <origin xyz="0.0 0.0 0.09" rpy="0 0 0" />
+    <origin xyz="0.2 0.0 0.09" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="link00" />
   </joint>

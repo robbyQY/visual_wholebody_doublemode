@@ -8,20 +8,20 @@ from .manip_loco_base_config import ManipLocoRoughCfg, ManipLocoRoughCfgPPO
 
 class B2Z1RoughCfg(ManipLocoRoughCfg):
     class goal_ee(ManipLocoRoughCfg.goal_ee):
-        collision_upper_limits = [0.5, 0.2, 0.12]
-        collision_lower_limits = [-0.35, -0.2, -0.72]
-        underground_limit = -0.72
+        collision_upper_limits = [0.2, 0.2, -0.05]
+        collision_lower_limits = [-0.7, -0.2, -0.7]
+        underground_limit = -0.7
 
         class urdf_mount(ManipLocoRoughCfg.goal_ee.urdf_mount):
-            arm_base_offset = [0.0, 0.0, 0.09]
+            arm_base_offset = [0.2, 0.0, 0.09]
             mount_yaw_offset = 0.0
             arm_waist_offset_z = 0.0585
             arm_shoulder_offset_z = 0.045
 
         class sphere_center(ManipLocoRoughCfg.goal_ee.sphere_center):
-            x_offset = 0.0
+            x_offset = 0.2
             y_offset = 0.0
-            z_invariant_offset = 0.705
+            z_invariant_offset = 0.7
             mixed_height_reference = False
             trunk_follow_ratio = 0.5
             trunk_follow_anchor = "arm_waist"
@@ -101,6 +101,14 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
         base_name = "base_link"
         gripper_name = "gripper_link"
         arm_waist_name = "joint1"
+        hip_joint_names = ["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"]
+        policy_leg_joint_names = [
+            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+        ]
+        policy_foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
         penalize_contacts_on = ["thigh", "base_link", "calf"]
         mount_urdf_generator = "b2z1"
 
