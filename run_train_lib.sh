@@ -726,6 +726,33 @@ run_queued_training_worker() {
     printf '[%(%Y-%m-%d %H:%M:%S)T] %s\n' -1 "$*"
   }
 
+  is_worker_pid_alive() {
+    local pid="${1:-}"
+    [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+  }
+
+  local train_pid=""
+
+  handle_worker_signal() {
+    local signal_name="$1"
+
+    if is_worker_pid_alive "${train_pid}"; then
+      log_line "Worker received ${signal_name}, forwarding to training PID ${train_pid}"
+      kill "-${signal_name}" "${train_pid}" 2>/dev/null || true
+      set +e
+      wait "${train_pid}"
+      set -e
+    else
+      log_line "Worker received ${signal_name} before training PID was ready"
+    fi
+
+    exit 128
+  }
+
+  trap 'handle_worker_signal TERM' TERM
+  trap 'handle_worker_signal INT' INT
+  trap 'handle_worker_signal HUP' HUP
+
   mkdir -p "${QUEUE_JOBS_DIR}"
   printf '%s\n' "$$" > "${JOB_DIR}/launcher_pid"
 
@@ -822,17 +849,17 @@ run_queued_training_worker() {
     (
       cd "${SCRIPT_DIR}"
       export CUDA_VISIBLE_DEVICES="${assigned_gpu_csv}"
-      "${train_cmd[@]}"
+      exec "${train_cmd[@]}"
     ) > /dev/null 2> >(timestamp_stderr_to_file "${ERROR_LOG}") &
   else
     (
       cd "${SCRIPT_DIR}"
       export CUDA_VISIBLE_DEVICES="${assigned_gpu_csv}"
-      "${train_cmd[@]}"
+      exec "${train_cmd[@]}"
     ) 2> >(timestamp_stderr_to_file "${ERROR_LOG}") &
   fi
 
-  local train_pid=$!
+  train_pid=$!
   acquire_queue_lock
   printf '%s\n' "${train_pid}" > "${JOB_DIR}/train_pid"
   printf 'running\n' > "${JOB_DIR}/state"

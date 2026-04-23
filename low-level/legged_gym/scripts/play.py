@@ -32,6 +32,7 @@ from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
 
 import isaacgym
+from isaacgym import gymtorch
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
 from legged_gym.utils.helpers import (
@@ -48,6 +49,76 @@ import time
 import sys
 
 np.set_printoptions(precision=3, suppress=True)
+
+
+def _print_force_sensor_diagnostics(env, step_idx):
+    foot_names = list(env.cfg.asset.policy_foot_names)
+    sensor = env.force_sensor_tensor[0].detach().cpu()
+    max_contact_force = float(env.cfg.rewards.max_contact_force)
+    print(f"[force_sensor] step={step_idx} max_contact_force={max_contact_force:.3f}")
+    for foot_idx, foot_name in enumerate(foot_names):
+        wrench = sensor[foot_idx]
+        force = wrench[:3]
+        torque = wrench[3:]
+        force_norm = torch.norm(force).item()
+        torque_norm = torch.norm(torque).item()
+        wrench_norm = torch.norm(wrench).item()
+        wrench_excess = max(wrench_norm - max_contact_force, 0.0)
+        force_str = ", ".join(f"{value:.3f}" for value in force.tolist())
+        torque_str = ", ".join(f"{value:.3f}" for value in torque.tolist())
+        print(
+            f"  {foot_name}: "
+            f"F=[{force_str}] |F|={force_norm:.3f}; "
+            f"T=[{torque_str}] |T|={torque_norm:.3f}; "
+            f"|wrench|={wrench_norm:.3f}; excess={wrench_excess:.3f}"
+        )
+
+
+def _apply_static_default_pose(env, env_ids=None):
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+    if len(env_ids) == 0:
+        return
+
+    env.root_states[env_ids] = env.base_init_state
+    env.root_states[env_ids, :3] += env.env_origins[env_ids]
+    env.root_states[env_ids, 7:13] = 0.0
+    env.gym.set_actor_root_state_tensor(env.sim, gymtorch.unwrap_tensor(env._root_states))
+
+    env.dof_pos[env_ids] = env.default_dof_pos.unsqueeze(0)
+    env.dof_vel[env_ids] = 0.0
+    env.gym.set_dof_state_tensor(env.sim, gymtorch.unwrap_tensor(env.dof_state))
+
+    env.actions[env_ids] = 0.0
+    env.last_actions[env_ids] = 0.0
+    env.last_dof_vel[env_ids] = 0.0
+    env.last_torques[env_ids] = 0.0
+    env.commands[env_ids] = 0.0
+    env.teleop_raw_commands[env_ids] = 0.0
+    env.gait_indices[env_ids] = 0.0
+    env.gait_frequencies[env_ids] = 0.0
+    env.desired_contact_states[env_ids] = 0.0
+    env.clock_inputs[env_ids] = 0.0
+    env.doubletime_clock_inputs[env_ids] = 0.0
+    env.halftime_clock_inputs[env_ids] = 0.0
+    env.feet_air_time[env_ids] = 0.0
+    env.action_history_buf[env_ids] = 0.0
+
+    env.cfg.env.teleop_mode = True
+    env.teleop_arm_control_mode = "joint"
+    arm_slice = slice(env.arm_dof_start_idx, env.arm_dof_end_idx)
+    gripper_slice = slice(env.num_dofs - env.cfg.env.num_gripper_joints, env.num_dofs)
+    env.teleop_arm_joint_pos_targets[env_ids] = env.default_dof_pos[arm_slice]
+    env.gripper_pos_targets[env_ids] = env.default_dof_pos[gripper_slice]
+    env.teleop_saved_arm_joint_targets[env_ids] = env.teleop_arm_joint_pos_targets[env_ids]
+    env.teleop_saved_gripper_pos_targets[env_ids] = env.gripper_pos_targets[env_ids]
+    env.teleop_hold_actual_ee_target[env_ids] = False
+    env.teleop_initialize_targets_on_next_reset = False
+
+    env.gym.refresh_actor_root_state_tensor(env.sim)
+    env.gym.refresh_dof_state_tensor(env.sim)
+    env.gym.refresh_rigid_body_state_tensor(env.sim)
+    env.gym.refresh_jacobian_tensors(env.sim)
 
 def play(args):
     log_pth = get_run_log_dir(args.proj_name, args.exptid)
@@ -66,6 +137,19 @@ def play(args):
     # env_cfg.domain_rand.push_interval_s = 2
     env_cfg.domain_rand.randomize_base_mass = True #False
     env_cfg.domain_rand.randomize_base_com = False
+
+    if args.static_default_pose:
+        env_cfg.env.teleop_mode = True
+        env_cfg.env.teleop_input_regularization = True
+        env_cfg.init_state.rand_yaw_range = 0.0
+        env_cfg.init_state.origin_perturb_range = 0.0
+        env_cfg.init_state.init_vel_perturb_range = 0.0
+        env_cfg.domain_rand.randomize_friction = False
+        env_cfg.domain_rand.randomize_base_mass = False
+        env_cfg.domain_rand.randomize_base_com = False
+        env_cfg.domain_rand.randomize_motor = False
+        env_cfg.domain_rand.randomize_gripper_mass = False
+        env_cfg.domain_rand.push_robots = False
     
     if args.flat_terrain:
         env_cfg.terrain.height = [0.0, 0.0]
@@ -74,9 +158,14 @@ def play(args):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
     # load policy
-    train_cfg.runner.resume = True
-    ppo_runner, train_cfg, checkpoint, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
-    policy = ppo_runner.get_inference_policy(device=env.device, stochastic=args.stochastic)
+    if args.static_default_pose:
+        ppo_runner = None
+        checkpoint = "static_default_pose"
+        policy = None
+    else:
+        train_cfg.runner.resume = True
+        ppo_runner, train_cfg, checkpoint, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
+        policy = ppo_runner.get_inference_policy(device=env.device, stochastic=args.stochastic)
 
     # export policy as a jit module (used to run it from C++)
     if EXPORT_POLICY:
@@ -93,7 +182,7 @@ def play(args):
         torch.save(ppo_runner.alg.actor_critic.actor.state_dict(), path + '/' + model_name + '_actor.pt')
         print('Saved actor to: ', path + '/' + model_name + '_actor.pt')
     
-    if args.use_jit:
+    if args.use_jit and not args.static_default_pose:
         path = os.path.join(log_pth, 'traced', args.exptid + "_" + str(args.checkpoint) + "_jit.pt")
         print("Loading jit for policy: ", path)
         policy = torch.jit.load(path, map_location=ppo_runner.device)
@@ -129,13 +218,24 @@ def play(args):
 
     # env.update_command_curriculum()
     env.reset()
+    if args.static_default_pose:
+        _apply_static_default_pose(env)
+        obs = env.get_observations()
     for i in range(traj_length):
         start_time = time.time()
-        if args.use_jit:
+        if args.static_default_pose:
+            actions = torch.zeros(env.num_envs, env.num_actions, device=env.device)
+        elif args.use_jit:
             actions = policy(torch.cat((obs[:, :env.cfg.env.num_proprio], obs[:, env.cfg.env.num_proprio+env.cfg.env.num_priv:]), dim=1))
         else:
             actions = policy(obs.detach(), hist_encoding=True)
         obs, _, rews, arm_rews, dones, infos = env.step(actions.detach())
+        if args.static_default_pose and torch.any(dones):
+            done_env_ids = dones.nonzero(as_tuple=False).flatten()
+            _apply_static_default_pose(env, done_env_ids)
+            obs = env.get_observations()
+        if args.print_force_sensor_every and (i % args.print_force_sensor_every == 0):
+            _print_force_sensor_diagnostics(env, i)
         if args.record_video:
             imgs = env.render_record(mode='rgb_array')
             if imgs is not None:

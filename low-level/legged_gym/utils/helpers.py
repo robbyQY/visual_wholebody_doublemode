@@ -759,6 +759,8 @@ def get_args(test=False):
         {"name": "--stochastic", "action": "store_true", "default": False, "help": "Use stochastic actions to play"},
         {"name": "--use_jit", "action": "store_true", "default": False,  "help": "Use jit to play"},
         {"name": "--record_video", "action": "store_true", "default": False,  "help": "Record video to play"},
+        {"name": "--print_force_sensor_every", "type": int, "default": 0, "help": "Playback-only: print per-foot force-sensor force/torque diagnostics every N simulation steps. Disabled when 0."},
+        {"name": "--static_default_pose", "action": "store_true", "default": False, "help": "Playback-only: skip the policy, hold zero leg actions, pin the arm to its default joint pose, and initialize the robot at the exact configured default state for static force inspection."},
         {"name": "--teleop_mode", "action": "store_true", "default": False,  "help": "Enable keyboard teleoperation mode"},
         {"name": "--teleop_input_regularization", "action": "store_true", "default": False, "help": "Preprocess teleop raw commands and arm targets before feeding the policy/control stack"},
         {"name": "--viewer_display_mode", "type": str, "choices": ["mesh", "collision"], "help": "Startup-only robot display mode. collision generates a derived URDF whose visual geometry matches collision shapes, without changing collision/inertial data or simulation dynamics."},

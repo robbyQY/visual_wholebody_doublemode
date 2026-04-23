@@ -43,9 +43,13 @@ EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (of
 CURRICULUM_ITER=""  # empty (start from curriculum step 0) | e.g. 3000
 CURRICULUM_PROGRESS=""  # empty | normalized progress in [0, 1], e.g. 0.6
 TRUNK_FOLLOW_RATIO="0.0"  # 0.0~1.0
+PRINT_FORCE_SENSOR_EVERY=""  # empty (disable) | e.g. 10
+STATIC_DEFAULT_POSE=false
 USE_JIT=false
 
-[[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
+if [[ "${STATIC_DEFAULT_POSE}" != true ]]; then
+  [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
+fi
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
 cd "${SCRIPT_DIR}"
@@ -62,6 +66,8 @@ python "play.py" \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
   $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
+  $([[ -n "${PRINT_FORCE_SENSOR_EVERY}" ]] && echo --print_force_sensor_every "${PRINT_FORCE_SENSOR_EVERY}") \
+  $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \
   $([[ -n "${CURRICULUM_ITER}" ]] && echo --curriculum_iter "${CURRICULUM_ITER}") \
   $([[ -n "${CURRICULUM_PROGRESS}" ]] && echo --curriculum_progress "${CURRICULUM_PROGRESS}") \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)
