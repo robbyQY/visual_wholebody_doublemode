@@ -24,6 +24,7 @@ PROJ_NAME=""
 TRAIN_MODE="fresh"      # fresh | resume | load
 LOAD_EXPTID=""          # used when TRAIN_MODE=load
 LOAD_CKPT="-1"          # used when TRAIN_MODE=load
+SEED=""
 MAX_ITERATIONS=""
 NUM_ENVS=""
 REQUESTED_NUM_GPUS="1"
@@ -33,6 +34,7 @@ WANDB_GROUP=""
 
 # Task / observation options
 EE_GOAL_OBS_MODE="command"  # command | arm_base_target
+ROBOT_ABLATION=""          # empty | none | legs | trunk | arm | mass | inertial | structure
 REWARD_SCALE_PRESET="legacy"  # legacy | height_flexible
 OBSERVE_GAIT_COMMANDS=true
 ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
@@ -64,6 +66,7 @@ TRAIN_SCALAR_VARS=(
   TRAIN_MODE
   LOAD_EXPTID
   LOAD_CKPT
+  SEED
   MAX_ITERATIONS
   NUM_ENVS
   REQUESTED_NUM_GPUS
@@ -71,6 +74,7 @@ TRAIN_SCALAR_VARS=(
   QUEUE_POLL_INTERVAL_S
   WANDB_GROUP
   EE_GOAL_OBS_MODE
+  ROBOT_ABLATION
   REWARD_SCALE_PRESET
   OBSERVE_GAIT_COMMANDS
   MIXED_HEIGHT_REFERENCE

@@ -77,6 +77,7 @@ VIEWER_DISPLAY_MODE="mesh"  # mesh | collision；只影响viewer显示，不影�
 TELEOP_INPUT_REGULARIZATION=false
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
 EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
+ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mass | inertial | structure
 USE_JIT=false
 
 [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
@@ -97,5 +98,6 @@ python "manip_loco_interface.py" \
   $([[ "${TELEOP_INPUT_REGULARIZATION}" == true ]] && echo --teleop_input_regularization) \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
   $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
+  $([[ -n "${ROBOT_ABLATION}" ]] && echo --robot_ablation "${ROBOT_ABLATION}") \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit)
 

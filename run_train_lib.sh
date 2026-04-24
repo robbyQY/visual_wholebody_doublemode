@@ -52,6 +52,22 @@ validate_optional_number() {
   run_train_die "${field_name} must be numeric, got: ${raw_value}"
 }
 
+validate_optional_robot_ablation() {
+  local raw_value="${1:-}"
+  if [[ -z "${raw_value}" ]]; then
+    return 0
+  fi
+  case "${raw_value}" in
+    none|legs|trunk|arm|mass|inertial|structure)
+      return 0
+      ;;
+    *)
+      run_train_die \
+        "Unsupported ROBOT_ABLATION=${raw_value}. Expected one of: none, legs, trunk, arm, mass, inertial, structure"
+      ;;
+  esac
+}
+
 sync_task_dependent_defaults() {
   if [[ -z "${PROJ_NAME}" ]]; then
     PROJ_NAME="${TASK}-low"
@@ -59,14 +75,20 @@ sync_task_dependent_defaults() {
 }
 
 generate_train_exptid() {
-  local reward_scale_preset="$1"
-  local mixed_height_reference="$2"
-  local trunk_follow_ratio="$3"
-  local omnidirectional_pos_y="$4"
-  local mount_deg="$5"
-  local enable_dynamic_gait_frequency="$6"
+  local wandb_group="$1"
+  local reward_scale_preset="$2"
+  local mixed_height_reference="$3"
+  local trunk_follow_ratio="$4"
+  local omnidirectional_pos_y="$5"
+  local mount_deg="$6"
+  local enable_dynamic_gait_frequency="$7"
+  local robot_ablation="$8"
   local exptid
   local -a exptid_parts=()
+
+  if [[ -n "${wandb_group}" ]]; then
+    exptid_parts+=("${wandb_group}")
+  fi
 
   case "${reward_scale_preset}" in
     height_flexible)
@@ -121,6 +143,10 @@ generate_train_exptid() {
     exptid_parts+=("动态步频")
   fi
 
+  if [[ -n "${robot_ablation}" && "${robot_ablation}" != "none" ]]; then
+    exptid_parts+=("abl-${robot_ablation}")
+  fi
+
   if (( ${#exptid_parts[@]} == 0 )); then
     run_train_die "Failed to auto-generate EXPTID."
   fi
@@ -159,6 +185,8 @@ raw_column_aliases = {
     "加载实验名": "LOAD_EXPTID",
     "LOAD_CKPT": "LOAD_CKPT",
     "加载检查点": "LOAD_CKPT",
+    "SEED": "SEED",
+    "随机种子": "SEED",
     "MAX_ITERATIONS": "MAX_ITERATIONS",
     "最大迭代数": "MAX_ITERATIONS",
     "NUM_ENVS": "NUM_ENVS",
@@ -167,6 +195,8 @@ raw_column_aliases = {
     "GPU张数": "REQUESTED_NUM_GPUS",
     "EE_GOAL_OBS_MODE": "EE_GOAL_OBS_MODE",
     "末端目标观测模式": "EE_GOAL_OBS_MODE",
+    "ROBOT_ABLATION": "ROBOT_ABLATION",
+    "机器人消融": "ROBOT_ABLATION",
     "REWARD_SCALE_PRESET": "REWARD_SCALE_PRESET",
     "奖励预设": "REWARD_SCALE_PRESET",
     "OBSERVE_GAIT_COMMANDS": "OBSERVE_GAIT_COMMANDS",
@@ -286,10 +316,12 @@ normalize_current_train_config() {
   fi
 
   validate_optional_number "${TRUNK_FOLLOW_RATIO}" "TRUNK_FOLLOW_RATIO"
+  validate_optional_number "${SEED}" "SEED"
   validate_optional_number "${MAX_ITERATIONS}" "MAX_ITERATIONS"
   validate_optional_number "${NUM_ENVS}" "NUM_ENVS"
   validate_optional_number "${MOUNT_X}" "MOUNT_X"
   validate_optional_number "${MOUNT_Y}" "MOUNT_Y"
+  validate_optional_robot_ablation "${ROBOT_ABLATION}"
 
   if [[ "${TRAIN_MODE}" == "load" && -z "${LOAD_EXPTID}" ]]; then
     run_train_die "LOAD_EXPTID must be set when TRAIN_MODE=load"
@@ -349,8 +381,14 @@ build_train_args() {
     --mount_deg "${MOUNT_DEG}"
   )
 
+  if [[ -n "${SEED}" ]]; then
+    TRAIN_ARGS+=(--seed "${SEED}")
+  fi
   if [[ "${OBSERVE_GAIT_COMMANDS}" == true ]]; then
     TRAIN_ARGS+=(--observe_gait_commands)
+  fi
+  if [[ -n "${ROBOT_ABLATION}" ]]; then
+    TRAIN_ARGS+=(--robot_ablation "${ROBOT_ABLATION}")
   fi
   if [[ "${MIXED_HEIGHT_REFERENCE}" == true ]]; then
     TRAIN_ARGS+=(--mixed_height_reference)
@@ -379,12 +417,14 @@ prepare_training_submission() {
   normalize_current_train_config
 
   EXPTID="$(generate_train_exptid \
+    "${WANDB_GROUP}" \
     "${REWARD_SCALE_PRESET}" \
     "${MIXED_HEIGHT_REFERENCE}" \
     "${TRUNK_FOLLOW_RATIO}" \
     "${OMNIDIRECTIONAL_POS_Y}" \
     "${MOUNT_DEG}" \
-    "${ENABLE_DYNAMIC_GAIT_FREQUENCY}")"
+    "${ENABLE_DYNAMIC_GAIT_FREQUENCY}" \
+    "${ROBOT_ABLATION}")"
 
   TOTAL_AVAILABLE_GPUS="$(get_total_gpu_count)"
   if ! [[ "${TOTAL_AVAILABLE_GPUS}" =~ ^[0-9]+$ ]]; then
@@ -593,10 +633,12 @@ write_job_snapshot_file() {
     printf 'PROJ_NAME=%q\n' "${PROJ_NAME}"
     printf 'TASK=%q\n' "${TASK}"
     printf 'EXPTID=%q\n' "${EXPTID}"
+    printf 'SEED=%q\n' "${SEED}"
     printf 'REQUESTED_NUM_GPUS=%q\n' "${REQUESTED_NUM_GPUS}"
     printf 'TOTAL_AVAILABLE_GPUS=%q\n' "${TOTAL_AVAILABLE_GPUS}"
     printf 'QUEUE_POLL_INTERVAL_S=%q\n' "${QUEUE_POLL_INTERVAL_S}"
     printf 'WANDB_GROUP=%q\n' "${WANDB_GROUP}"
+    printf 'ROBOT_ABLATION=%q\n' "${ROBOT_ABLATION}"
     printf 'ERROR_LOG=%q\n' "${ERROR_LOG}"
     printf 'QUEUE_LOG=%q\n' "${QUEUE_LOG}"
     printf 'BACKGROUND_MODE=%q\n' "${NOHUP_BACKGROUND}"
@@ -629,9 +671,11 @@ write_job_metadata_file() {
     printf 'TRAIN_MODE=%q\n' "${TRAIN_MODE}"
     printf 'LOAD_EXPTID=%q\n' "${LOAD_EXPTID}"
     printf 'LOAD_CKPT=%q\n' "${LOAD_CKPT}"
+    printf 'SEED=%q\n' "${SEED}"
     printf 'MAX_ITERATIONS=%q\n' "${MAX_ITERATIONS}"
     printf 'TRAIN_LOG_EVERY=%q\n' "${TRAIN_LOG_EVERY}"
     printf 'EE_GOAL_OBS_MODE=%q\n' "${EE_GOAL_OBS_MODE}"
+    printf 'ROBOT_ABLATION=%q\n' "${ROBOT_ABLATION}"
     printf 'REWARD_SCALE_PRESET=%q\n' "${REWARD_SCALE_PRESET}"
     printf 'OBSERVE_GAIT_COMMANDS=%q\n' "${OBSERVE_GAIT_COMMANDS}"
     printf 'MIXED_HEIGHT_REFERENCE=%q\n' "${MIXED_HEIGHT_REFERENCE}"
@@ -650,9 +694,10 @@ enqueue_training_job() {
 
   RUN_INSTANCE_ID="$(date +%Y%m%d_%H%M%S)_$$"
   local script_log_dir="${ROOT_DIR}/logs"
+  local queue_log_timestamp
   mkdir -p "${script_log_dir}"
   ERROR_LOG="${script_log_dir}/error_${RUN_INSTANCE_ID}.log"
-  QUEUE_LOG="${script_log_dir}/queue_${RUN_INSTANCE_ID}.log"
+  queue_log_timestamp="$(date +%Y%m%d_%H%M%S)"
 
   mkdir -p "${QUEUE_JOBS_DIR}"
 
@@ -669,6 +714,7 @@ enqueue_training_job() {
   printf '%s\n' "$(( next_order + 1 ))" > "${next_order_file}"
   JOB_ID="$(printf '%06d_%s' "${JOB_ORDER}" "${RUN_INSTANCE_ID}")"
   JOB_DIR="${QUEUE_JOBS_DIR}/${JOB_ID}"
+  QUEUE_LOG="${script_log_dir}/queue_${queue_log_timestamp}_${JOB_ID}.log"
   mkdir -p "${JOB_DIR}"
   printf '%s\n' "${JOB_ORDER}" > "${JOB_DIR}/order"
   printf 'queued\n' > "${JOB_DIR}/state"
@@ -697,8 +743,13 @@ enqueue_training_job() {
   fi
 
   if [[ "${NOHUP_BACKGROUND}" == true ]]; then
+    touch "${QUEUE_LOG}"
     nohup "${job_worker_file}" "${job_snapshot_file}" > "${QUEUE_LOG}" 2>&1 &
     local launcher_pid=$!
+    local final_queue_log="${script_log_dir}/queue_${queue_log_timestamp}_${launcher_pid}.log"
+    mv "${QUEUE_LOG}" "${final_queue_log}"
+    QUEUE_LOG="${final_queue_log}"
+    printf '%s\n' "${QUEUE_LOG}" > "${JOB_DIR}/queue_log"
     echo "${launch_message_prefix} (launcher PID=${launcher_pid})."
   else
     echo "${launch_message_prefix}."

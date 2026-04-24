@@ -474,7 +474,7 @@ class ManipLoco_rewards:
         first_contact = (self.env.feet_air_time > 0.) * self.env.foot_contacts_from_sensor  #self.env.contact_filt
         self.env.feet_air_time += self.env.dt
 
-        if self.env.cfg.rewards.feet_aritime_allfeet:
+        if self.env.cfg.rewards.feet_airtime_allfeet:
             first_contact_float = first_contact.float()
             air_time_at_contact = self.env.feet_air_time * first_contact_float
         else:

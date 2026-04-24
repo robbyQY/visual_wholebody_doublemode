@@ -40,6 +40,7 @@ HEADLESS=false
 VIEWER_DISPLAY_MODE="mesh"  # mesh | collision；只影响viewer显示，不影响实际动力学
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
 EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
+ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mass | inertial | structure
 CURRICULUM_ITER=""  # empty (start from curriculum step 0) | e.g. 3000
 CURRICULUM_PROGRESS=""  # empty | normalized progress in [0, 1], e.g. 0.6
 TRUNK_FOLLOW_RATIO="0.0"  # 0.0~1.0
@@ -65,6 +66,7 @@ python "play.py" \
   $([[ "${HEADLESS}" == false ]] && echo --viewer_display_mode "${VIEWER_DISPLAY_MODE}") \
   --action_delay_mode "${ACTION_DELAY_MODE}" \
   $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
+  $([[ -n "${ROBOT_ABLATION}" ]] && echo --robot_ablation "${ROBOT_ABLATION}") \
   $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
   $([[ -n "${PRINT_FORCE_SENSOR_EVERY}" ]] && echo --print_force_sensor_every "${PRINT_FORCE_SENSOR_EVERY}") \
   $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \

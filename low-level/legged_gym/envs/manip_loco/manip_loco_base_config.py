@@ -169,6 +169,7 @@ class ManipLocoRoughCfg(LeggedRobotCfg):
         flip_visual_attachments = False
         collapse_fixed_joints = True # Specific fixed joints can be kept by adding " <... dont_collapse=\"true\">"
         fix_base_link = False
+        robot_ablation = "none"
 
     class box:
         box_size = 0.1
@@ -209,7 +210,7 @@ class ManipLocoRoughCfg(LeggedRobotCfg):
         gait_transition_lower = 0.1
         gait_transition_upper = 0.9
         feet_height_target = 0.3
-        feet_aritime_allfeet = False
+        feet_airtime_allfeet = False
         feet_height_allfeet = False
 
         class scales:

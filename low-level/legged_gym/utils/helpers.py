@@ -43,6 +43,12 @@ from isaacgym import gymutil
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from .b1z1_mount import ensure_mount_urdf, mount_deg_to_rad, normalize_mount_deg, normalize_mount_xyz
 from .collision_visual_urdf import ensure_collision_visual_urdf
+from .robot_ablation import (
+    B1Z1_B2Z1_ROBOT_ABLATION_CHOICES,
+    canonicalize_b1z1_b2z1_robot_ablation,
+    ensure_cross_robot_ablation_urdf,
+    get_b1z1_b2z1_robot_ablation_checkpoint_value,
+)
 
 RUN_METADATA_FILENAME = "run_metadata.json"
 CHECKPOINT_FEATURE_NAMES = (
@@ -50,6 +56,7 @@ CHECKPOINT_FEATURE_NAMES = (
     "mixed_height_reference",
     "omnidirectional_pos_y",
     "ee_goal_obs_mode",
+    "robot_ablation",
     "reward_scale_preset",
     "gait_frequency_min",
     "gait_frequency_max",
@@ -149,6 +156,8 @@ def _normalize_checkpoint_feature_value(feature_name, value):
         return None
     if feature_name in BOOL_CHECKPOINT_FEATURES:
         return bool(value)
+    if feature_name == "robot_ablation":
+        return get_b1z1_b2z1_robot_ablation_checkpoint_value(value)
     if feature_name == "ee_goal_obs_mode":
         return str(value)
     if feature_name == "reward_scale_preset":
@@ -170,6 +179,7 @@ def _extract_checkpoint_features(args, env_cfg):
         "mixed_height_reference": bool(env_cfg.goal_ee.sphere_center.mixed_height_reference),
         "omnidirectional_pos_y": bool(env_cfg.goal_ee.ranges.omnidirectional_pos_y),
         "ee_goal_obs_mode": str(env_cfg.env.ee_goal_obs_mode),
+        "robot_ablation": get_b1z1_b2z1_robot_ablation_checkpoint_value(env_cfg.asset.robot_ablation),
         "reward_scale_preset": str(env_cfg.rewards.reward_scale_preset),
         "gait_frequency_min": float(env_cfg.env.gait_frequency_min),
         "gait_frequency_max": float(env_cfg.env.gait_frequency_max),
@@ -185,6 +195,16 @@ def _extract_checkpoint_features(args, env_cfg):
         checkpoint_features["mount_y"] = mount_xyz[1]
         checkpoint_features["mount_z"] = mount_xyz[2]
     return checkpoint_features
+
+def _infer_base_robot_from_asset_file(asset_file):
+    if not asset_file:
+        return None
+    normalized = str(asset_file).replace("\\", "/").lower()
+    if "/resources/robots/b1z1/" in normalized:
+        return "b1z1"
+    if "/resources/robots/b2z1/" in normalized:
+        return "b2z1"
+    return None
 
 def save_run_metadata(log_dir, args, env_cfg=None, train_cfg=None, filename=None):
     os.makedirs(log_dir, exist_ok=True)
@@ -343,6 +363,7 @@ def load_run_metadata(log_dir, filename=None):
     mixed_height_reference = _parse_bool_from_train_log(train_log_path, "MIXED_HEIGHT_REFERENCE")
     omnidirectional_pos_y = _parse_bool_from_train_log(train_log_path, "OMNIDIRECTIONAL_POS_Y")
     reward_scale_preset = _parse_string_from_train_log(train_log_path, "REWARD_SCALE_PRESET")
+    robot_ablation = _parse_string_from_train_log(train_log_path, "ROBOT_ABLATION")
     gait_frequency_min = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MIN")
     gait_frequency_max = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MAX")
     gait_frequency_lin_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_LIN_VEL_REF")
@@ -361,6 +382,8 @@ def load_run_metadata(log_dir, filename=None):
         checkpoint_features["omnidirectional_pos_y"] = omnidirectional_pos_y
     if ee_goal_obs_mode is not None:
         checkpoint_features["ee_goal_obs_mode"] = ee_goal_obs_mode
+    if robot_ablation is not None:
+        checkpoint_features["robot_ablation"] = get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation)
     if reward_scale_preset is not None:
         checkpoint_features["reward_scale_preset"] = reward_scale_preset
     if gait_frequency_min is not None:
@@ -552,6 +575,9 @@ def get_load_path(root, checkpoint=-1, model_name_include="model"):
 def update_cfg_from_args(env_cfg, cfg_train, args):
     # seed
     if env_cfg is not None:
+        robot_ablation = canonicalize_b1z1_b2z1_robot_ablation(getattr(args, "robot_ablation", None))
+        if robot_ablation is not None:
+            env_cfg.asset.robot_ablation = get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation)
         # num envs
         if args.num_envs is not None:
             env_cfg.env.num_envs = args.num_envs
@@ -618,25 +644,47 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             if args.mount_z is not None:
                 mount_xyz[2] = float(args.mount_z)
             urdf_mount_cfg.arm_base_offset = list(normalize_mount_xyz(mount_xyz))
+            if args.mount_deg is not None:
+                urdf_mount_cfg.mount_yaw_offset = mount_deg_to_rad(args.mount_deg)
 
-            mount_urdf_generator = getattr(env_cfg.asset, "mount_urdf_generator", None)
-            if mount_urdf_generator is not None:
-                should_generate_mount_urdf = (
-                    args.mount_deg is not None
-                    or args.mount_x is not None
-                    or args.mount_y is not None
-                    or args.mount_z is not None
-                )
-                if should_generate_mount_urdf:
-                    mount_deg = normalize_mount_deg(np.degrees(float(urdf_mount_cfg.mount_yaw_offset)))
-                    urdf_mount_cfg.mount_yaw_offset = mount_deg_to_rad(mount_deg)
-                    mount_urdf_rel_path = ensure_mount_urdf(
-                        LEGGED_GYM_ROOT_DIR,
-                        mount_urdf_generator,
-                        mount_deg,
-                        urdf_mount_cfg.arm_base_offset,
+            resolved_mount_deg = normalize_mount_deg(np.degrees(float(urdf_mount_cfg.mount_yaw_offset)))
+            urdf_mount_cfg.mount_yaw_offset = mount_deg_to_rad(resolved_mount_deg)
+            if robot_ablation is not None:
+                base_robot = getattr(env_cfg.asset, "mount_urdf_generator", None)
+                if base_robot not in ("b1z1", "b2z1"):
+                    base_robot = _infer_base_robot_from_asset_file(getattr(env_cfg.asset, "file", None))
+                if base_robot not in ("b1z1", "b2z1"):
+                    raise ValueError(
+                        f"robot_ablation={robot_ablation!r} requires asset.mount_urdf_generator to identify the base robot, "
+                        f"got mount_urdf_generator={getattr(env_cfg.asset, 'mount_urdf_generator', None)!r}, "
+                        f"asset.file={getattr(env_cfg.asset, 'file', None)!r}."
                     )
-                    env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
+                ablation_urdf_rel_path = ensure_cross_robot_ablation_urdf(
+                    LEGGED_GYM_ROOT_DIR,
+                    base_robot,
+                    robot_ablation,
+                    resolved_mount_deg,
+                    urdf_mount_cfg.arm_base_offset,
+                )
+                env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{ablation_urdf_rel_path.replace(os.sep, "/")}'
+                env_cfg.asset.mount_urdf_generator = None
+            else:
+                mount_urdf_generator = getattr(env_cfg.asset, "mount_urdf_generator", None)
+                if mount_urdf_generator is not None:
+                    should_generate_mount_urdf = (
+                        args.mount_deg is not None
+                        or args.mount_x is not None
+                        or args.mount_y is not None
+                        or args.mount_z is not None
+                    )
+                    if should_generate_mount_urdf:
+                        mount_urdf_rel_path = ensure_mount_urdf(
+                            LEGGED_GYM_ROOT_DIR,
+                            mount_urdf_generator,
+                            resolved_mount_deg,
+                            urdf_mount_cfg.arm_base_offset,
+                        )
+                        env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{mount_urdf_rel_path.replace(os.sep, "/")}'
         if getattr(env_cfg.asset, "visual_mode", "mesh") == "collision":
             collision_visual_asset_path = ensure_collision_visual_urdf(
                 env_cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR),
@@ -766,6 +814,7 @@ def get_args(test=False):
         {"name": "--viewer_display_mode", "type": str, "choices": ["mesh", "collision"], "help": "Startup-only robot display mode. collision generates a derived URDF whose visual geometry matches collision shapes, without changing collision/inertial data or simulation dynamics."},
         {"name": "--action_delay_mode", "type": str, "choices": ["auto", "undelayed", "delayed"], "help": "Action delay mode for play/teleop: auto keeps the training switch, undelayed always uses the latest action, delayed always uses a one-step delayed action."},
         {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
+        {"name": "--robot_ablation", "type": str, "choices": ["none", *B1Z1_B2Z1_ROBOT_ABLATION_CHOICES], "help": "Cross-robot morphology ablation URDF. Keeps the current task robot as the base tree/naming and swaps selected mapped properties with the other robot: b1z1 uses b2z1 as the source, and b2z1 uses b1z1 as the source."},
         {"name": "--reward_scale_preset", "type": str, "choices": ["legacy", "height_flexible"], "help": "Reward scale preset used to populate rewards.scales for training/playback."},
         {"name": "--gait_frequency_min", "type": float, "help": "Minimum gait clock frequency used when gait commands are enabled."},
         {"name": "--gait_frequency_max", "type": float, "help": "Maximum gait clock frequency used when gait commands are enabled."},
