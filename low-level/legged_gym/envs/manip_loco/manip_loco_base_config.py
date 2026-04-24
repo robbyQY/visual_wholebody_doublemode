@@ -170,6 +170,7 @@ class ManipLocoRoughCfg(LeggedRobotCfg):
         collapse_fixed_joints = True # Specific fixed joints can be kept by adding " <... dont_collapse=\"true\">"
         fix_base_link = False
         robot_ablation = "none"
+        leg_collision_scale = 1.0
 
     class box:
         box_size = 0.1

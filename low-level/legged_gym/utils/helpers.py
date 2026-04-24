@@ -48,6 +48,7 @@ from .robot_ablation import (
     canonicalize_b1z1_b2z1_robot_ablation,
     ensure_cross_robot_ablation_urdf,
     get_b1z1_b2z1_robot_ablation_checkpoint_value,
+    normalize_leg_collision_scale,
 )
 
 RUN_METADATA_FILENAME = "run_metadata.json"
@@ -57,6 +58,7 @@ CHECKPOINT_FEATURE_NAMES = (
     "omnidirectional_pos_y",
     "ee_goal_obs_mode",
     "robot_ablation",
+    "leg_collision_scale",
     "reward_scale_preset",
     "gait_frequency_min",
     "gait_frequency_max",
@@ -82,6 +84,7 @@ FLOAT_CHECKPOINT_FEATURES = {
     "mount_x",
     "mount_y",
     "mount_z",
+    "leg_collision_scale",
 }
 PLAYBACK_CURRICULUM_SCHEDULE_NAMES = (
     "lin_vel_x_min_schedule",
@@ -158,6 +161,8 @@ def _normalize_checkpoint_feature_value(feature_name, value):
         return bool(value)
     if feature_name == "robot_ablation":
         return get_b1z1_b2z1_robot_ablation_checkpoint_value(value)
+    if feature_name == "leg_collision_scale":
+        return normalize_leg_collision_scale(value)
     if feature_name == "ee_goal_obs_mode":
         return str(value)
     if feature_name == "reward_scale_preset":
@@ -180,6 +185,7 @@ def _extract_checkpoint_features(args, env_cfg):
         "omnidirectional_pos_y": bool(env_cfg.goal_ee.ranges.omnidirectional_pos_y),
         "ee_goal_obs_mode": str(env_cfg.env.ee_goal_obs_mode),
         "robot_ablation": get_b1z1_b2z1_robot_ablation_checkpoint_value(env_cfg.asset.robot_ablation),
+        "leg_collision_scale": normalize_leg_collision_scale(getattr(env_cfg.asset, "leg_collision_scale", 1.0)),
         "reward_scale_preset": str(env_cfg.rewards.reward_scale_preset),
         "gait_frequency_min": float(env_cfg.env.gait_frequency_min),
         "gait_frequency_max": float(env_cfg.env.gait_frequency_max),
@@ -327,7 +333,7 @@ def _parse_float_from_train_log(log_path, key):
 def _parse_string_from_train_log(log_path, key):
     if not os.path.isfile(log_path):
         return None
-    pattern = re.compile(rf"{re.escape(key)}=([A-Za-z0-9_\-]+)")
+    pattern = re.compile(rf"{re.escape(key)}=([A-Za-z0-9_\-+,]+)")
     value = None
     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
@@ -364,6 +370,7 @@ def load_run_metadata(log_dir, filename=None):
     omnidirectional_pos_y = _parse_bool_from_train_log(train_log_path, "OMNIDIRECTIONAL_POS_Y")
     reward_scale_preset = _parse_string_from_train_log(train_log_path, "REWARD_SCALE_PRESET")
     robot_ablation = _parse_string_from_train_log(train_log_path, "ROBOT_ABLATION")
+    leg_collision_scale = _parse_float_from_train_log(train_log_path, "LEG_COLLISION_SCALE")
     gait_frequency_min = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MIN")
     gait_frequency_max = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_MAX")
     gait_frequency_lin_vel_ref = _parse_float_from_train_log(train_log_path, "GAIT_FREQUENCY_LIN_VEL_REF")
@@ -384,6 +391,8 @@ def load_run_metadata(log_dir, filename=None):
         checkpoint_features["ee_goal_obs_mode"] = ee_goal_obs_mode
     if robot_ablation is not None:
         checkpoint_features["robot_ablation"] = get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation)
+    if leg_collision_scale is not None:
+        checkpoint_features["leg_collision_scale"] = normalize_leg_collision_scale(leg_collision_scale)
     if reward_scale_preset is not None:
         checkpoint_features["reward_scale_preset"] = reward_scale_preset
     if gait_frequency_min is not None:
@@ -576,8 +585,10 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
     # seed
     if env_cfg is not None:
         robot_ablation = canonicalize_b1z1_b2z1_robot_ablation(getattr(args, "robot_ablation", None))
+        leg_collision_scale = normalize_leg_collision_scale(getattr(args, "leg_collision_scale", None))
         if robot_ablation is not None:
             env_cfg.asset.robot_ablation = get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation)
+        env_cfg.asset.leg_collision_scale = leg_collision_scale
         # num envs
         if args.num_envs is not None:
             env_cfg.env.num_envs = args.num_envs
@@ -649,13 +660,14 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
 
             resolved_mount_deg = normalize_mount_deg(np.degrees(float(urdf_mount_cfg.mount_yaw_offset)))
             urdf_mount_cfg.mount_yaw_offset = mount_deg_to_rad(resolved_mount_deg)
-            if robot_ablation is not None:
+            should_generate_ablation_urdf = robot_ablation is not None or leg_collision_scale != 1.0
+            if should_generate_ablation_urdf:
                 base_robot = getattr(env_cfg.asset, "mount_urdf_generator", None)
                 if base_robot not in ("b1z1", "b2z1"):
                     base_robot = _infer_base_robot_from_asset_file(getattr(env_cfg.asset, "file", None))
                 if base_robot not in ("b1z1", "b2z1"):
                     raise ValueError(
-                        f"robot_ablation={robot_ablation!r} requires asset.mount_urdf_generator to identify the base robot, "
+                        f"robot_ablation={robot_ablation!r}, leg_collision_scale={leg_collision_scale!r} requires asset.mount_urdf_generator to identify the base robot, "
                         f"got mount_urdf_generator={getattr(env_cfg.asset, 'mount_urdf_generator', None)!r}, "
                         f"asset.file={getattr(env_cfg.asset, 'file', None)!r}."
                     )
@@ -665,6 +677,7 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
                     robot_ablation,
                     resolved_mount_deg,
                     urdf_mount_cfg.arm_base_offset,
+                    leg_collision_scale,
                 )
                 env_cfg.asset.file = f'{{LEGGED_GYM_ROOT_DIR}}/{ablation_urdf_rel_path.replace(os.sep, "/")}'
                 env_cfg.asset.mount_urdf_generator = None
@@ -814,7 +827,8 @@ def get_args(test=False):
         {"name": "--viewer_display_mode", "type": str, "choices": ["mesh", "collision"], "help": "Startup-only robot display mode. collision generates a derived URDF whose visual geometry matches collision shapes, without changing collision/inertial data or simulation dynamics."},
         {"name": "--action_delay_mode", "type": str, "choices": ["auto", "undelayed", "delayed"], "help": "Action delay mode for play/teleop: auto keeps the training switch, undelayed always uses the latest action, delayed always uses a one-step delayed action."},
         {"name": "--ee_goal_obs_mode", "type": str, "choices": ["command", "arm_base_target"], "help": "End-effector goal observation semantics: command uses the sampled command directly, arm_base_target uses the target relative to the arm base for legacy checkpoints."},
-        {"name": "--robot_ablation", "type": str, "choices": ["none", *B1Z1_B2Z1_ROBOT_ABLATION_CHOICES], "help": "Cross-robot morphology ablation URDF. Keeps the current task robot as the base tree/naming and swaps selected mapped properties with the other robot: b1z1 uses b2z1 as the source, and b2z1 uses b1z1 as the source."},
+        {"name": "--robot_ablation", "type": str, "help": "Cross-robot morphology ablation URDF. Combine multiple values with ',' or '+'. Supported values: none, " + ", ".join(B1Z1_B2Z1_ROBOT_ABLATION_CHOICES) + "."},
+        {"name": "--leg_collision_scale", "type": float, "help": "Uniform scale applied to leg collision geometry in the generated URDF. Use 1.0 for the original collision geometry."},
         {"name": "--reward_scale_preset", "type": str, "choices": ["legacy", "height_flexible"], "help": "Reward scale preset used to populate rewards.scales for training/playback."},
         {"name": "--gait_frequency_min", "type": float, "help": "Minimum gait clock frequency used when gait commands are enabled."},
         {"name": "--gait_frequency_max", "type": float, "help": "Maximum gait clock frequency used when gait commands are enabled."},

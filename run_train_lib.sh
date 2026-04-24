@@ -57,15 +57,49 @@ validate_optional_robot_ablation() {
   if [[ -z "${raw_value}" ]]; then
     return 0
   fi
-  case "${raw_value}" in
-    none|legs|trunk|arm|mass|inertial|structure)
-      return 0
-      ;;
-    *)
-      run_train_die \
-        "Unsupported ROBOT_ABLATION=${raw_value}. Expected one of: none, legs, trunk, arm, mass, inertial, structure"
-      ;;
-  esac
+  local normalized="${raw_value//,/+}"
+  local token
+  local -a tokens=()
+  IFS='+' read -r -a tokens <<< "${normalized}"
+  for token in "${tokens[@]}"; do
+    token="$(printf '%s' "${token}" | xargs)"
+    case "${token}" in
+      ""|none|legs|trunk|arm|mass|inertial|structure)
+        ;;
+      *)
+        run_train_die \
+          "Unsupported ROBOT_ABLATION=${raw_value}. Expected one or more of: none, legs, trunk, arm, mass, inertial, structure (combine with ',' or '+')"
+        ;;
+    esac
+  done
+}
+
+canonicalize_optional_robot_ablation() {
+  local raw_value="${1:-}"
+  if [[ -z "${raw_value}" ]]; then
+    printf '\n'
+    return 0
+  fi
+  local normalized="${raw_value//,/+}"
+  local token
+  local choice
+  local -a tokens=()
+  local -a canonical=()
+  IFS='+' read -r -a tokens <<< "${normalized}"
+  for choice in legs trunk arm mass inertial structure; do
+    for token in "${tokens[@]}"; do
+      token="$(printf '%s' "${token}" | xargs)"
+      if [[ "${token}" == "${choice}" ]]; then
+        canonical+=("${choice}")
+        break
+      fi
+    done
+  done
+  if (( ${#canonical[@]} == 0 )); then
+    printf 'none\n'
+  else
+    printf '%s\n' "$(IFS=+; echo "${canonical[*]}")"
+  fi
 }
 
 sync_task_dependent_defaults() {
@@ -83,6 +117,7 @@ generate_train_exptid() {
   local mount_deg="$6"
   local enable_dynamic_gait_frequency="$7"
   local robot_ablation="$8"
+  local leg_collision_scale="$9"
   local exptid
   local -a exptid_parts=()
 
@@ -146,6 +181,9 @@ generate_train_exptid() {
   if [[ -n "${robot_ablation}" && "${robot_ablation}" != "none" ]]; then
     exptid_parts+=("abl-${robot_ablation}")
   fi
+  if [[ -n "${leg_collision_scale}" && "${leg_collision_scale}" != "1" && "${leg_collision_scale}" != "1.0" && "${leg_collision_scale}" != "1.00" ]]; then
+    exptid_parts+=("legcol-${leg_collision_scale}")
+  fi
 
   if (( ${#exptid_parts[@]} == 0 )); then
     run_train_die "Failed to auto-generate EXPTID."
@@ -197,6 +235,8 @@ raw_column_aliases = {
     "末端目标观测模式": "EE_GOAL_OBS_MODE",
     "ROBOT_ABLATION": "ROBOT_ABLATION",
     "机器人消融": "ROBOT_ABLATION",
+    "LEG_COLLISION_SCALE": "LEG_COLLISION_SCALE",
+    "腿部碰撞体缩放": "LEG_COLLISION_SCALE",
     "REWARD_SCALE_PRESET": "REWARD_SCALE_PRESET",
     "奖励预设": "REWARD_SCALE_PRESET",
     "OBSERVE_GAIT_COMMANDS": "OBSERVE_GAIT_COMMANDS",
@@ -321,7 +361,9 @@ normalize_current_train_config() {
   validate_optional_number "${NUM_ENVS}" "NUM_ENVS"
   validate_optional_number "${MOUNT_X}" "MOUNT_X"
   validate_optional_number "${MOUNT_Y}" "MOUNT_Y"
+  validate_optional_number "${LEG_COLLISION_SCALE}" "LEG_COLLISION_SCALE"
   validate_optional_robot_ablation "${ROBOT_ABLATION}"
+  ROBOT_ABLATION="$(canonicalize_optional_robot_ablation "${ROBOT_ABLATION}")"
 
   if [[ "${TRAIN_MODE}" == "load" && -z "${LOAD_EXPTID}" ]]; then
     run_train_die "LOAD_EXPTID must be set when TRAIN_MODE=load"
@@ -390,6 +432,9 @@ build_train_args() {
   if [[ -n "${ROBOT_ABLATION}" ]]; then
     TRAIN_ARGS+=(--robot_ablation "${ROBOT_ABLATION}")
   fi
+  if [[ -n "${LEG_COLLISION_SCALE}" ]]; then
+    TRAIN_ARGS+=(--leg_collision_scale "${LEG_COLLISION_SCALE}")
+  fi
   if [[ "${MIXED_HEIGHT_REFERENCE}" == true ]]; then
     TRAIN_ARGS+=(--mixed_height_reference)
   fi
@@ -424,7 +469,8 @@ prepare_training_submission() {
     "${OMNIDIRECTIONAL_POS_Y}" \
     "${MOUNT_DEG}" \
     "${ENABLE_DYNAMIC_GAIT_FREQUENCY}" \
-    "${ROBOT_ABLATION}")"
+    "${ROBOT_ABLATION}" \
+    "${LEG_COLLISION_SCALE}")"
 
   TOTAL_AVAILABLE_GPUS="$(get_total_gpu_count)"
   if ! [[ "${TOTAL_AVAILABLE_GPUS}" =~ ^[0-9]+$ ]]; then
@@ -639,6 +685,7 @@ write_job_snapshot_file() {
     printf 'QUEUE_POLL_INTERVAL_S=%q\n' "${QUEUE_POLL_INTERVAL_S}"
     printf 'WANDB_GROUP=%q\n' "${WANDB_GROUP}"
     printf 'ROBOT_ABLATION=%q\n' "${ROBOT_ABLATION}"
+    printf 'LEG_COLLISION_SCALE=%q\n' "${LEG_COLLISION_SCALE}"
     printf 'ERROR_LOG=%q\n' "${ERROR_LOG}"
     printf 'QUEUE_LOG=%q\n' "${QUEUE_LOG}"
     printf 'BACKGROUND_MODE=%q\n' "${NOHUP_BACKGROUND}"
@@ -676,6 +723,7 @@ write_job_metadata_file() {
     printf 'TRAIN_LOG_EVERY=%q\n' "${TRAIN_LOG_EVERY}"
     printf 'EE_GOAL_OBS_MODE=%q\n' "${EE_GOAL_OBS_MODE}"
     printf 'ROBOT_ABLATION=%q\n' "${ROBOT_ABLATION}"
+    printf 'LEG_COLLISION_SCALE=%q\n' "${LEG_COLLISION_SCALE}"
     printf 'REWARD_SCALE_PRESET=%q\n' "${REWARD_SCALE_PRESET}"
     printf 'OBSERVE_GAIT_COMMANDS=%q\n' "${OBSERVE_GAIT_COMMANDS}"
     printf 'MIXED_HEIGHT_REFERENCE=%q\n' "${MIXED_HEIGHT_REFERENCE}"
@@ -687,6 +735,49 @@ write_job_metadata_file() {
     printf 'ENABLE_DYNAMIC_GAIT_FREQUENCY=%q\n' "${ENABLE_DYNAMIC_GAIT_FREQUENCY}"
     write_array_declaration TRAIN_ARGS "${TRAIN_ARGS[@]}"
   } > "${metadata_file}"
+}
+
+extract_queue_log_stamp() {
+  local queue_log_path="$1"
+  local launcher_pid="$2"
+  local queue_log_name
+  local suffix
+  queue_log_name="$(basename "${queue_log_path}")"
+  suffix="_${JOB_ID}.log"
+  if [[ "${queue_log_name}" == queue_*"${suffix}" ]]; then
+    local stamped_name="${queue_log_name#queue_}"
+    printf '%s\n' "${stamped_name%"${suffix}"}"
+    return 0
+  fi
+  if [[ "${queue_log_name}" == "queue_"*"_${launcher_pid}.log" ]]; then
+    local stamped_name="${queue_log_name#queue_}"
+    printf '%s\n' "${stamped_name%_${launcher_pid}.log}"
+    return 0
+  fi
+  run_train_die "Failed to extract queue log stamp from path: ${queue_log_path}"
+}
+
+set_job_log_paths_for_launcher_pid() {
+  local launcher_pid="$1"
+  local current_queue_log="$2"
+  local queue_log_dir
+  local queue_log_stamp
+  local final_queue_log
+  local final_error_log
+
+  queue_log_dir="$(dirname "${current_queue_log}")"
+  queue_log_stamp="$(extract_queue_log_stamp "${current_queue_log}" "${launcher_pid}")"
+  final_queue_log="${queue_log_dir}/queue_${queue_log_stamp}_${launcher_pid}.log"
+  final_error_log="${queue_log_dir}/error_${queue_log_stamp}_${launcher_pid}.log"
+
+  if [[ -f "${current_queue_log}" && "${current_queue_log}" != "${final_queue_log}" ]]; then
+    mv "${current_queue_log}" "${final_queue_log}"
+  fi
+
+  QUEUE_LOG="${final_queue_log}"
+  ERROR_LOG="${final_error_log}"
+  printf '%s\n' "${QUEUE_LOG}" > "${JOB_DIR}/queue_log"
+  printf '%s\n' "${ERROR_LOG}" > "${JOB_DIR}/error_log"
 }
 
 enqueue_training_job() {
@@ -746,10 +837,7 @@ enqueue_training_job() {
     touch "${QUEUE_LOG}"
     nohup "${job_worker_file}" "${job_snapshot_file}" > "${QUEUE_LOG}" 2>&1 &
     local launcher_pid=$!
-    local final_queue_log="${script_log_dir}/queue_${queue_log_timestamp}_${launcher_pid}.log"
-    mv "${QUEUE_LOG}" "${final_queue_log}"
-    QUEUE_LOG="${final_queue_log}"
-    printf '%s\n' "${QUEUE_LOG}" > "${JOB_DIR}/queue_log"
+    set_job_log_paths_for_launcher_pid "${launcher_pid}" "${QUEUE_LOG}"
     echo "${launch_message_prefix} (launcher PID=${launcher_pid})."
   else
     echo "${launch_message_prefix}."
@@ -806,6 +894,23 @@ run_queued_training_worker() {
 
   mkdir -p "${QUEUE_JOBS_DIR}"
   printf '%s\n' "$$" > "${JOB_DIR}/launcher_pid"
+  if [[ "${BACKGROUND_MODE}" == true ]]; then
+    local synced_queue_log=""
+    local synced_error_log=""
+    local sync_attempt
+    for ((sync_attempt=0; sync_attempt<20; sync_attempt++)); do
+      synced_queue_log="$(read_file_or_empty "${JOB_DIR}/queue_log")"
+      synced_error_log="$(read_file_or_empty "${JOB_DIR}/error_log")"
+      if [[ "${synced_queue_log}" =~ _$$\.log$ && "${synced_error_log}" =~ _$$\.log$ ]]; then
+        QUEUE_LOG="${synced_queue_log}"
+        ERROR_LOG="${synced_error_log}"
+        break
+      fi
+      sleep 0.05
+    done
+  else
+    set_job_log_paths_for_launcher_pid "$$" "${QUEUE_LOG}"
+  fi
 
   export LEGGED_GYM_LOG_ROOT="${LEGGED_GYM_LOG_ROOT_VALUE}"
   if [[ "${DISABLE_WANDB}" == true ]]; then

@@ -290,6 +290,7 @@ def log_training_header(args, log_pth, num_gpus, env_cfg=None):
     print(f"OMNIDIRECTIONAL_POS_Y={env_cfg.goal_ee.ranges.omnidirectional_pos_y}")
     checkpoint_features = _extract_checkpoint_features(args, env_cfg)
     print(f"ROBOT_ABLATION={checkpoint_features['robot_ablation']}")
+    print(f"LEG_COLLISION_SCALE={checkpoint_features['leg_collision_scale']}")
     print(f"MOUNT_DEG={checkpoint_features['mount_deg'] if 'mount_deg' in checkpoint_features else None}")
     print(f"MOUNT_X={checkpoint_features['mount_x'] if 'mount_x' in checkpoint_features else None}")
     print(f"MOUNT_Y={checkpoint_features['mount_y'] if 'mount_y' in checkpoint_features else None}")

@@ -178,24 +178,48 @@ _ROBOT_ABLATION_SPECS = {
 def canonicalize_b1z1_b2z1_robot_ablation(robot_ablation):
     if robot_ablation is None:
         return None
-    normalized = str(robot_ablation).strip().lower()
-    if not normalized:
+    if isinstance(robot_ablation, (list, tuple)):
+        raw_tokens = robot_ablation
+    else:
+        normalized = str(robot_ablation).strip().lower()
+        if not normalized:
+            return None
+        raw_tokens = normalized.replace(",", "+").split("+")
+
+    canonical = []
+    for raw_token in raw_tokens:
+        normalized = str(raw_token).strip().lower()
+        if not normalized:
+            continue
+        normalized = _ROBOT_ABLATION_ALIASES.get(normalized, normalized)
+        if normalized is None:
+            continue
+        if normalized not in B1Z1_B2Z1_ROBOT_ABLATION_CHOICES:
+            supported = ", ".join(B1Z1_B2Z1_ROBOT_ABLATION_CHOICES)
+            raise ValueError(
+                f"Unsupported robot_ablation={robot_ablation!r}. "
+                f"Supported values: {supported}, none. Combine multiple values with ',' or '+'."
+            )
+        canonical.append(normalized)
+
+    if not canonical:
         return None
-    normalized = _ROBOT_ABLATION_ALIASES.get(normalized, normalized)
-    if normalized is None:
-        return None
-    if normalized not in B1Z1_B2Z1_ROBOT_ABLATION_CHOICES:
-        supported = ", ".join(B1Z1_B2Z1_ROBOT_ABLATION_CHOICES)
-        raise ValueError(
-            f"Unsupported robot_ablation={robot_ablation!r}. "
-            f"Supported values: {supported}, none."
-        )
-    return normalized
+    unique = set(canonical)
+    return tuple(choice for choice in B1Z1_B2Z1_ROBOT_ABLATION_CHOICES if choice in unique)
 
 
 def get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation):
     canonical = canonicalize_b1z1_b2z1_robot_ablation(robot_ablation)
-    return canonical if canonical is not None else "none"
+    return "+".join(canonical) if canonical is not None else "none"
+
+
+def normalize_leg_collision_scale(leg_collision_scale):
+    if leg_collision_scale is None or str(leg_collision_scale).strip() == "":
+        return 1.0
+    scale = float(leg_collision_scale)
+    if scale <= 0.0:
+        raise ValueError(f"leg_collision_scale must be positive, got: {leg_collision_scale!r}")
+    return scale
 
 
 def _format_mount_xyz_token(value):
@@ -203,6 +227,13 @@ def _format_mount_xyz_token(value):
     if abs(value) < 1e-12:
         value = 0.0
     text = f"{value:.6f}".rstrip("0").rstrip(".")
+    if text in {"", "-0"}:
+        text = "0"
+    return text.replace("-", "m").replace(".", "p")
+
+
+def _format_scale_token(value):
+    text = f"{normalize_leg_collision_scale(value):.6f}".rstrip("0").rstrip(".")
     if text in {"", "-0"}:
         text = "0"
     return text.replace("-", "m").replace(".", "p")
@@ -294,6 +325,45 @@ def _replace_joint_structure(target_joint, source_joint):
             target_joint.append(copy.deepcopy(source_child))
 
 
+def _scale_float_list_attribute(node, attribute_name, scale):
+    raw_value = node.attrib.get(attribute_name)
+    if raw_value is None:
+        return
+    scaled_values = [f"{float(token) * scale:.12g}" for token in raw_value.split()]
+    node.set(attribute_name, " ".join(scaled_values))
+
+
+def _scale_collision_geometry(geometry_node, scale):
+    box = geometry_node.find("box")
+    if box is not None:
+        _scale_float_list_attribute(box, "size", scale)
+    sphere = geometry_node.find("sphere")
+    if sphere is not None and "radius" in sphere.attrib:
+        sphere.set("radius", f"{float(sphere.attrib['radius']) * scale:.12g}")
+    cylinder = geometry_node.find("cylinder")
+    if cylinder is not None:
+        if "radius" in cylinder.attrib:
+            cylinder.set("radius", f"{float(cylinder.attrib['radius']) * scale:.12g}")
+        if "length" in cylinder.attrib:
+            cylinder.set("length", f"{float(cylinder.attrib['length']) * scale:.12g}")
+    capsule = geometry_node.find("capsule")
+    if capsule is not None:
+        if "radius" in capsule.attrib:
+            capsule.set("radius", f"{float(capsule.attrib['radius']) * scale:.12g}")
+        if "length" in capsule.attrib:
+            capsule.set("length", f"{float(capsule.attrib['length']) * scale:.12g}")
+
+
+def _scale_link_collision_geometry(root, link_names, scale):
+    target_links = _find_named_elements(root, "link")
+    for link_name in link_names:
+        link = target_links[link_name]
+        for collision in link.findall("collision"):
+            geometry = collision.find("geometry")
+            if geometry is not None:
+                _scale_collision_geometry(geometry, scale)
+
+
 def _set_mount_joint_origin(root, mount_joint_name, mount_deg, mount_xyz):
     mount_joint = _find_named_elements(root, "joint").get(mount_joint_name)
     if mount_joint is None:
@@ -372,34 +442,46 @@ def _get_robot_ablation_spec(base_robot):
         raise ValueError(f"Unsupported base_robot={base_robot!r}. Supported values: {supported}.") from exc
 
 
-def get_generated_robot_ablation_urdf_rel_path(base_robot, robot_ablation, mount_deg, mount_xyz):
+def get_generated_robot_ablation_urdf_rel_path(base_robot, robot_ablation, mount_deg, mount_xyz, leg_collision_scale=1.0):
     spec = _get_robot_ablation_spec(base_robot)
     robot_ablation = canonicalize_b1z1_b2z1_robot_ablation(robot_ablation)
-    if robot_ablation is None:
-        raise ValueError("robot_ablation must not be empty when generating an ablation URDF")
+    leg_collision_scale = normalize_leg_collision_scale(leg_collision_scale)
+    if robot_ablation is None and leg_collision_scale == 1.0:
+        raise ValueError("robot_ablation or leg_collision_scale must request a generated URDF")
     mount_deg = normalize_mount_deg(mount_deg)
     mount_xyz = normalize_mount_xyz(mount_xyz)
     xyz_suffix = "_".join(
         f"{axis}{_format_mount_xyz_token(value)}"
         for axis, value in zip(("x", "y", "z"), mount_xyz)
     )
-    filename = f"{spec['generated_filename_prefix']}_{robot_ablation}_{mount_deg}_{xyz_suffix}.urdf"
+    ablation_suffix = get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation)
+    scale_suffix = ""
+    if leg_collision_scale != 1.0:
+        scale_suffix = f"_legcol{_format_scale_token(leg_collision_scale)}"
+    filename = f"{spec['generated_filename_prefix']}_{ablation_suffix}_{mount_deg}_{xyz_suffix}{scale_suffix}.urdf"
     return os.path.join(spec["generated_urdf_dir_rel_path"], filename)
 
 
-def ensure_cross_robot_ablation_urdf(root_dir, base_robot, robot_ablation, mount_deg, mount_xyz):
+def ensure_cross_robot_ablation_urdf(root_dir, base_robot, robot_ablation, mount_deg, mount_xyz, leg_collision_scale=1.0):
     spec = _get_robot_ablation_spec(base_robot)
     other_spec = _get_robot_ablation_spec(spec["other_robot"])
     robot_ablation = canonicalize_b1z1_b2z1_robot_ablation(robot_ablation)
-    if robot_ablation is None:
-        raise ValueError("robot_ablation must not be empty when generating an ablation URDF")
+    leg_collision_scale = normalize_leg_collision_scale(leg_collision_scale)
+    if robot_ablation is None and leg_collision_scale == 1.0:
+        raise ValueError("robot_ablation or leg_collision_scale must request a generated URDF")
 
     mount_deg = normalize_mount_deg(mount_deg)
     mount_xyz = normalize_mount_xyz(mount_xyz)
 
     target_source_path = os.path.join(root_dir, spec["source_urdf_rel_path"])
     other_source_path = os.path.join(root_dir, other_spec["source_urdf_rel_path"])
-    output_rel_path = get_generated_robot_ablation_urdf_rel_path(base_robot, robot_ablation, mount_deg, mount_xyz)
+    output_rel_path = get_generated_robot_ablation_urdf_rel_path(
+        base_robot,
+        robot_ablation,
+        mount_deg,
+        mount_xyz,
+        leg_collision_scale,
+    )
     output_path = os.path.join(root_dir, output_rel_path)
     output_dir = os.path.dirname(output_path)
     target_source_dir = os.path.dirname(target_source_path)
@@ -412,109 +494,120 @@ def ensure_cross_robot_ablation_urdf(root_dir, base_robot, robot_ablation, mount
 
     _rebase_resource_filenames(target_root, target_source_dir, output_dir)
 
-    if robot_ablation == "legs":
-        _apply_structure_ablation(
-            target_root,
-            other_root,
-            ("legs",),
-            spec["component_links"],
-            spec["component_joints"],
-            spec["target_to_other_link_map"],
-            spec["target_to_other_joint_map"],
-            other_source_dir,
-            output_dir,
-        )
-        _apply_inertial_ablation(
-            target_root,
-            other_root,
-            ("legs",),
-            spec["component_links"],
-            spec["target_to_other_link_map"],
-            other_source_dir,
-            output_dir,
-        )
-    elif robot_ablation == "trunk":
-        _apply_structure_ablation(
-            target_root,
-            other_root,
-            ("trunk",),
-            spec["component_links"],
-            spec["component_joints"],
-            spec["target_to_other_link_map"],
-            spec["target_to_other_joint_map"],
-            other_source_dir,
-            output_dir,
-        )
-        _apply_inertial_ablation(
-            target_root,
-            other_root,
-            ("trunk",),
-            spec["component_links"],
-            spec["target_to_other_link_map"],
-            other_source_dir,
-            output_dir,
-        )
-    elif robot_ablation == "arm":
-        _apply_structure_ablation(
-            target_root,
-            other_root,
-            ("arm",),
-            spec["component_links"],
-            spec["component_joints"],
-            spec["target_to_other_link_map"],
-            spec["target_to_other_joint_map"],
-            other_source_dir,
-            output_dir,
-        )
-        _apply_inertial_ablation(
-            target_root,
-            other_root,
-            ("arm",),
-            spec["component_links"],
-            spec["target_to_other_link_map"],
-            other_source_dir,
-            output_dir,
-        )
-    elif robot_ablation == "mass":
-        _apply_mass_only_ablation(
-            target_root,
-            other_root,
-            ("trunk", "legs", "arm"),
-            spec["component_links"],
-            spec["target_to_other_link_map"],
-        )
-    elif robot_ablation == "inertial":
-        _apply_inertial_ablation(
-            target_root,
-            other_root,
-            ("trunk", "legs", "arm"),
-            spec["component_links"],
-            spec["target_to_other_link_map"],
-            other_source_dir,
-            output_dir,
-        )
-    elif robot_ablation == "structure":
-        _apply_structure_ablation(
-            target_root,
-            other_root,
-            ("trunk", "legs", "arm"),
-            spec["component_links"],
-            spec["component_joints"],
-            spec["target_to_other_link_map"],
-            spec["target_to_other_joint_map"],
-            other_source_dir,
-            output_dir,
-        )
-    else:
-        raise ValueError(f"Unsupported robot_ablation={robot_ablation!r}")
+    for ablation_name in robot_ablation or ():
+        if ablation_name == "legs":
+            _apply_structure_ablation(
+                target_root,
+                other_root,
+                ("legs",),
+                spec["component_links"],
+                spec["component_joints"],
+                spec["target_to_other_link_map"],
+                spec["target_to_other_joint_map"],
+                other_source_dir,
+                output_dir,
+            )
+            _apply_inertial_ablation(
+                target_root,
+                other_root,
+                ("legs",),
+                spec["component_links"],
+                spec["target_to_other_link_map"],
+                other_source_dir,
+                output_dir,
+            )
+        elif ablation_name == "trunk":
+            _apply_structure_ablation(
+                target_root,
+                other_root,
+                ("trunk",),
+                spec["component_links"],
+                spec["component_joints"],
+                spec["target_to_other_link_map"],
+                spec["target_to_other_joint_map"],
+                other_source_dir,
+                output_dir,
+            )
+            _apply_inertial_ablation(
+                target_root,
+                other_root,
+                ("trunk",),
+                spec["component_links"],
+                spec["target_to_other_link_map"],
+                other_source_dir,
+                output_dir,
+            )
+        elif ablation_name == "arm":
+            _apply_structure_ablation(
+                target_root,
+                other_root,
+                ("arm",),
+                spec["component_links"],
+                spec["component_joints"],
+                spec["target_to_other_link_map"],
+                spec["target_to_other_joint_map"],
+                other_source_dir,
+                output_dir,
+            )
+            _apply_inertial_ablation(
+                target_root,
+                other_root,
+                ("arm",),
+                spec["component_links"],
+                spec["target_to_other_link_map"],
+                other_source_dir,
+                output_dir,
+            )
+        elif ablation_name == "mass":
+            _apply_mass_only_ablation(
+                target_root,
+                other_root,
+                ("trunk", "legs", "arm"),
+                spec["component_links"],
+                spec["target_to_other_link_map"],
+            )
+        elif ablation_name == "inertial":
+            _apply_inertial_ablation(
+                target_root,
+                other_root,
+                ("trunk", "legs", "arm"),
+                spec["component_links"],
+                spec["target_to_other_link_map"],
+                other_source_dir,
+                output_dir,
+            )
+        elif ablation_name == "structure":
+            _apply_structure_ablation(
+                target_root,
+                other_root,
+                ("trunk", "legs", "arm"),
+                spec["component_links"],
+                spec["component_joints"],
+                spec["target_to_other_link_map"],
+                spec["target_to_other_joint_map"],
+                other_source_dir,
+                output_dir,
+            )
+        else:
+            raise ValueError(f"Unsupported robot_ablation={ablation_name!r}")
+
+    if leg_collision_scale != 1.0:
+        _scale_link_collision_geometry(target_root, spec["component_links"]["legs"], leg_collision_scale)
 
     _set_mount_joint_origin(target_root, spec["mount_joint_name"], mount_deg, mount_xyz)
-    target_root.set("name", f"{base_robot}_{robot_ablation}")
+    target_root.set("name", f"{base_robot}_{get_b1z1_b2z1_robot_ablation_checkpoint_value(robot_ablation)}_legcol{_format_scale_token(leg_collision_scale)}")
     _indent_xml(target_root)
     tree = ET.ElementTree(target_root)
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
     return output_rel_path
 
 
-def ensure_b1z1_ablation_urdf(root_dir, robot_ablation, mount_deg, mount_xyz):
-    return ensure_cross_robot_ablation_urdf(root_dir, "b1z1", robot_ablation, mount_deg, mount_xyz)
+def ensure_b1z1_ablation_urdf(root_dir, robot_ablation, mount_deg, mount_xyz, leg_collision_scale=1.0):
+    return ensure_cross_robot_ablation_urdf(
+        root_dir,
+        "b1z1",
+        robot_ablation,
+        mount_deg,
+        mount_xyz,
+        leg_collision_scale,
+    )
