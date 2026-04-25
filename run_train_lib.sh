@@ -59,16 +59,21 @@ validate_optional_robot_ablation() {
   fi
   local normalized="${raw_value//,/+}"
   local token
+  local normalized_token
   local -a tokens=()
   IFS='+' read -r -a tokens <<< "${normalized}"
   for token in "${tokens[@]}"; do
-    token="$(printf '%s' "${token}" | xargs)"
-    case "${token}" in
-      ""|none|legs|trunk|arm|mass|inertial|structure)
+    normalized_token="$(printf '%s' "${token}" | xargs)"
+    normalized_token="$(printf '%s' "${normalized_token}" | tr '[:upper:]' '[:lower:]')"
+    normalized_token="${normalized_token//_/-}"
+    normalized_token="${normalized_token//./-}"
+    normalized_token="${normalized_token//:/-}"
+    case "${normalized_token}" in
+      ""|none|legs|trunk|arm|mass|inertial|structure|legs-mass|legs-inertial|legs-structure|trunk-mass|trunk-inertial|trunk-structure|arm-mass|arm-inertial|arm-structure)
         ;;
       *)
         run_train_die \
-          "Unsupported ROBOT_ABLATION=${raw_value}. Expected one or more of: none, legs, trunk, arm, mass, inertial, structure (combine with ',' or '+')"
+          "Unsupported ROBOT_ABLATION=${raw_value}. Expected one or more of: none, legs, trunk, arm, mass, inertial, structure, <legs|trunk|arm>-<mass|inertial|structure> (combine with ',' or '+')"
         ;;
     esac
   done
@@ -83,13 +88,18 @@ canonicalize_optional_robot_ablation() {
   local normalized="${raw_value//,/+}"
   local token
   local choice
+  local normalized_token
   local -a tokens=()
   local -a canonical=()
   IFS='+' read -r -a tokens <<< "${normalized}"
-  for choice in legs trunk arm mass inertial structure; do
+  for choice in legs trunk arm mass inertial structure legs-mass legs-inertial legs-structure trunk-mass trunk-inertial trunk-structure arm-mass arm-inertial arm-structure; do
     for token in "${tokens[@]}"; do
-      token="$(printf '%s' "${token}" | xargs)"
-      if [[ "${token}" == "${choice}" ]]; then
+      normalized_token="$(printf '%s' "${token}" | xargs)"
+      normalized_token="$(printf '%s' "${normalized_token}" | tr '[:upper:]' '[:lower:]')"
+      normalized_token="${normalized_token//_/-}"
+      normalized_token="${normalized_token//./-}"
+      normalized_token="${normalized_token//:/-}"
+      if [[ "${normalized_token}" == "${choice}" ]]; then
         canonical+=("${choice}")
         break
       fi

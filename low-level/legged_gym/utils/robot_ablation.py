@@ -12,11 +12,23 @@ B1Z1_B2Z1_ROBOT_ABLATION_CHOICES = (
     "mass",
     "inertial",
     "structure",
+    "legs-mass",
+    "legs-inertial",
+    "legs-structure",
+    "trunk-mass",
+    "trunk-inertial",
+    "trunk-structure",
+    "arm-mass",
+    "arm-inertial",
+    "arm-structure",
 )
 
 _ROBOT_ABLATION_ALIASES = {
     "none": None,
 }
+
+_ROBOT_ABLATION_COMPONENTS = ("legs", "trunk", "arm")
+_ROBOT_ABLATION_ASPECTS = ("mass", "inertial", "structure")
 
 _LINK_MAP_B1_TO_B2 = {
     "trunk": "base_link",
@@ -191,6 +203,7 @@ def canonicalize_b1z1_b2z1_robot_ablation(robot_ablation):
         normalized = str(raw_token).strip().lower()
         if not normalized:
             continue
+        normalized = normalized.replace("_", "-").replace(".", "-").replace(":", "-")
         normalized = _ROBOT_ABLATION_ALIASES.get(normalized, normalized)
         if normalized is None:
             continue
@@ -434,6 +447,82 @@ def _apply_mass_only_ablation(target_root, source_root, component_names, compone
         _replace_mass_only(target_links[target_link_name], source_links[source_link_name])
 
 
+def _apply_robot_ablation_token(
+    target_root,
+    source_root,
+    ablation_name,
+    spec,
+    other_source_dir,
+    output_dir,
+):
+    if ablation_name in _ROBOT_ABLATION_COMPONENTS:
+        component_names = (ablation_name,)
+        _apply_structure_ablation(
+            target_root,
+            source_root,
+            component_names,
+            spec["component_links"],
+            spec["component_joints"],
+            spec["target_to_other_link_map"],
+            spec["target_to_other_joint_map"],
+            other_source_dir,
+            output_dir,
+        )
+        _apply_inertial_ablation(
+            target_root,
+            source_root,
+            component_names,
+            spec["component_links"],
+            spec["target_to_other_link_map"],
+            other_source_dir,
+            output_dir,
+        )
+        return
+
+    if ablation_name in _ROBOT_ABLATION_ASPECTS:
+        component_names = _ROBOT_ABLATION_COMPONENTS
+        aspect_name = ablation_name
+    else:
+        try:
+            component_name, aspect_name = ablation_name.split("-", 1)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported robot_ablation={ablation_name!r}") from exc
+        component_names = (component_name,)
+
+    if aspect_name == "mass":
+        _apply_mass_only_ablation(
+            target_root,
+            source_root,
+            component_names,
+            spec["component_links"],
+            spec["target_to_other_link_map"],
+        )
+    elif aspect_name == "inertial":
+        _apply_inertial_ablation(
+            target_root,
+            source_root,
+            component_names,
+            spec["component_links"],
+            spec["target_to_other_link_map"],
+            other_source_dir,
+            output_dir,
+        )
+    elif aspect_name == "structure":
+        _apply_structure_ablation(
+            target_root,
+            source_root,
+            component_names,
+            spec["component_links"],
+            spec["component_joints"],
+            spec["target_to_other_link_map"],
+            spec["target_to_other_joint_map"],
+            other_source_dir,
+            output_dir,
+        )
+    else:
+        raise ValueError(f"Unsupported robot_ablation={ablation_name!r}")
+
+
 def _get_robot_ablation_spec(base_robot):
     try:
         return _ROBOT_ABLATION_SPECS[base_robot]
@@ -495,101 +584,14 @@ def ensure_cross_robot_ablation_urdf(root_dir, base_robot, robot_ablation, mount
     _rebase_resource_filenames(target_root, target_source_dir, output_dir)
 
     for ablation_name in robot_ablation or ():
-        if ablation_name == "legs":
-            _apply_structure_ablation(
-                target_root,
-                other_root,
-                ("legs",),
-                spec["component_links"],
-                spec["component_joints"],
-                spec["target_to_other_link_map"],
-                spec["target_to_other_joint_map"],
-                other_source_dir,
-                output_dir,
-            )
-            _apply_inertial_ablation(
-                target_root,
-                other_root,
-                ("legs",),
-                spec["component_links"],
-                spec["target_to_other_link_map"],
-                other_source_dir,
-                output_dir,
-            )
-        elif ablation_name == "trunk":
-            _apply_structure_ablation(
-                target_root,
-                other_root,
-                ("trunk",),
-                spec["component_links"],
-                spec["component_joints"],
-                spec["target_to_other_link_map"],
-                spec["target_to_other_joint_map"],
-                other_source_dir,
-                output_dir,
-            )
-            _apply_inertial_ablation(
-                target_root,
-                other_root,
-                ("trunk",),
-                spec["component_links"],
-                spec["target_to_other_link_map"],
-                other_source_dir,
-                output_dir,
-            )
-        elif ablation_name == "arm":
-            _apply_structure_ablation(
-                target_root,
-                other_root,
-                ("arm",),
-                spec["component_links"],
-                spec["component_joints"],
-                spec["target_to_other_link_map"],
-                spec["target_to_other_joint_map"],
-                other_source_dir,
-                output_dir,
-            )
-            _apply_inertial_ablation(
-                target_root,
-                other_root,
-                ("arm",),
-                spec["component_links"],
-                spec["target_to_other_link_map"],
-                other_source_dir,
-                output_dir,
-            )
-        elif ablation_name == "mass":
-            _apply_mass_only_ablation(
-                target_root,
-                other_root,
-                ("trunk", "legs", "arm"),
-                spec["component_links"],
-                spec["target_to_other_link_map"],
-            )
-        elif ablation_name == "inertial":
-            _apply_inertial_ablation(
-                target_root,
-                other_root,
-                ("trunk", "legs", "arm"),
-                spec["component_links"],
-                spec["target_to_other_link_map"],
-                other_source_dir,
-                output_dir,
-            )
-        elif ablation_name == "structure":
-            _apply_structure_ablation(
-                target_root,
-                other_root,
-                ("trunk", "legs", "arm"),
-                spec["component_links"],
-                spec["component_joints"],
-                spec["target_to_other_link_map"],
-                spec["target_to_other_joint_map"],
-                other_source_dir,
-                output_dir,
-            )
-        else:
-            raise ValueError(f"Unsupported robot_ablation={ablation_name!r}")
+        _apply_robot_ablation_token(
+            target_root,
+            other_root,
+            ablation_name,
+            spec,
+            other_source_dir,
+            output_dir,
+        )
 
     if leg_collision_scale != 1.0:
         _scale_link_collision_geometry(target_root, spec["component_links"]["legs"], leg_collision_scale)

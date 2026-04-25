@@ -34,7 +34,7 @@ WANDB_GROUP=""
 
 # Task / observation options
 EE_GOAL_OBS_MODE="command"  # command | arm_base_target
-ROBOT_ABLATION=""          # empty | none | legs | trunk | arm | mass | inertial | structure; combine with "," or "+"
+ROBOT_ABLATION=""          # empty | none | legs | trunk | arm | mass | inertial | structure | legs-inertial, etc.; combine with "," or "+"
 LEG_COLLISION_SCALE=""     # empty | e.g. 0.9; scales leg collision geometry independently of ROBOT_ABLATION
 REWARD_SCALE_PRESET="legacy"  # legacy | height_flexible
 OBSERVE_GAIT_COMMANDS=true

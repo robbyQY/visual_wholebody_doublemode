@@ -77,7 +77,7 @@ VIEWER_DISPLAY_MODE="mesh"  # mesh | collision；只影响viewer显示，不影�
 TELEOP_INPUT_REGULARIZATION=false
 ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
 EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
-ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mass | inertial | structure; combine with "," or "+"
+ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mass | inertial | structure | legs-inertial, etc.; combine with "," or "+"
 LEG_COLLISION_SCALE=""  # empty (follow checkpoint) | e.g. 0.9
 USE_JIT=false
 
