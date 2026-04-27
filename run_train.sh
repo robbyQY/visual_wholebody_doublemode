@@ -36,7 +36,7 @@ WANDB_GROUP=""
 EE_GOAL_OBS_MODE="command"  # command | arm_base_target
 ROBOT_ABLATION=""          # empty | none | legs | trunk | arm | mass | inertial | structure | legs-inertial, etc.; combine with "," or "+"
 LEG_COLLISION_SCALE=""     # empty | e.g. 0.9; scales leg collision geometry independently of ROBOT_ABLATION
-REWARD_SCALE_PRESET="legacy"  # legacy | height_flexible
+REWARD_SCALE_PRESET="legacy"  # legacy | height_flexible | robotlab_b2
 OBSERVE_GAIT_COMMANDS=true
 ENABLE_DYNAMIC_GAIT_FREQUENCY=false  # min/max gait frequency = 1.2/2.8
 MIXED_HEIGHT_REFERENCE=true

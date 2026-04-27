@@ -370,6 +370,9 @@ def _scale_collision_geometry(geometry_node, scale):
 def _scale_link_collision_geometry(root, link_names, scale):
     target_links = _find_named_elements(root, "link")
     for link_name in link_names:
+        if not (link_name.endswith("_thigh") or link_name.endswith("_calf")):
+            continue
+
         link = target_links[link_name]
         for collision in link.findall("collision"):
             geometry = collision.find("geometry")

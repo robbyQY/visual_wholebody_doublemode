@@ -142,8 +142,11 @@ generate_train_exptid() {
     legacy)
       exptid_parts+=("前倾")
       ;;
+    robotlab_b2)
+      exptid_parts+=("robotlab")
+      ;;
     *)
-      run_train_die "Unsupported REWARD_SCALE_PRESET=${reward_scale_preset}. Expected one of: legacy, height_flexible"
+      run_train_die "Unsupported REWARD_SCALE_PRESET=${reward_scale_preset}. Expected one of: legacy, height_flexible, robotlab_b2"
       ;;
   esac
 
@@ -332,10 +335,10 @@ normalize_current_train_config() {
   esac
 
   case "${REWARD_SCALE_PRESET}" in
-    legacy|height_flexible)
+    legacy|height_flexible|robotlab_b2)
       ;;
     *)
-      run_train_die "Unsupported REWARD_SCALE_PRESET=${REWARD_SCALE_PRESET}. Expected one of: legacy, height_flexible"
+      run_train_die "Unsupported REWARD_SCALE_PRESET=${REWARD_SCALE_PRESET}. Expected one of: legacy, height_flexible, robotlab_b2"
       ;;
   esac
 

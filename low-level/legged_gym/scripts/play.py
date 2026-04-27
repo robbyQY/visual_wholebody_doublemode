@@ -33,6 +33,7 @@ import os
 
 import isaacgym
 from isaacgym import gymtorch
+from isaacgym.torch_utils import euler_from_quat, quat_apply
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
 from legged_gym.utils.helpers import (
@@ -50,27 +51,194 @@ import sys
 
 np.set_printoptions(precision=3, suppress=True)
 
+def _format_values(values):
+    return ", ".join(f"{float(value):.3f}" for value in values)
 
-def _print_force_sensor_diagnostics(env, step_idx):
+def _format_contact_flags(flags):
+    return "".join("1" if bool(flag) else "0" for flag in flags)
+
+def _print_force_sensor_diagnostics(
+    env,
+    step_idx,
+    summary_interval=100,
+    detail_interval=1000,
+    support_ratio_warn_high=1.5,
+    max_contact_force_warn=300.0,
+    body_angle_warn_deg=25.0,
+):
     foot_names = list(env.cfg.asset.policy_foot_names)
-    sensor = env.force_sensor_tensor[0].detach().cpu()
-    max_contact_force = float(env.cfg.rewards.max_contact_force)
-    print(f"[force_sensor] step={step_idx} max_contact_force={max_contact_force:.3f}")
+
+    sensor_wrench_local_dev = env.force_sensor_tensor[0]
+    sensor_wrench_local = sensor_wrench_local_dev.detach().cpu()
+
+    foot_quats = env.rigid_body_state[0, env.feet_indices, 3:7]
+    sensor_force_world = quat_apply(
+        foot_quats,
+        sensor_wrench_local_dev[:, :3],
+    ).detach().cpu()
+
+    contact_forces_world = env.contact_forces[0, env.feet_indices, :].detach().cpu()
+    foot_state = env.rigid_body_state[0, env.feet_indices, :].detach().cpu()
+    foot_vel_world = foot_state[:, 7:10]
+    foot_speed = torch.norm(foot_vel_world, dim=-1)
+
+    sensor_contact_flags = env.foot_contacts_from_sensor[0].detach().cpu()
+    contact_force_flags = torch.norm(contact_forces_world, dim=-1) > 2.0
+
+    if not hasattr(env, "_diagnostic_total_mass"):
+        body_props = env.gym.get_actor_rigid_body_properties(
+            env.envs[0],
+            env.actor_handles[0],
+        )
+        env._diagnostic_total_mass = sum(prop.mass for prop in body_props)
+
+    total_mass = float(env._diagnostic_total_mass)
+    expected_weight = total_mass * 9.81
+
+    contact_fz = contact_forces_world[:, 2]
+    total_vertical_support = float(contact_fz.sum().item())
+    support_ratio = total_vertical_support / max(expected_weight, 1e-6)
+
+    front_vertical_support = 0.0
+    rear_vertical_support = 0.0
+    left_vertical_support = 0.0
+    right_vertical_support = 0.0
+
     for foot_idx, foot_name in enumerate(foot_names):
-        wrench = sensor[foot_idx]
-        force = wrench[:3]
-        torque = wrench[3:]
-        force_norm = torch.norm(force).item()
-        torque_norm = torch.norm(torque).item()
-        wrench_norm = torch.norm(wrench).item()
-        wrench_excess = max(wrench_norm - max_contact_force, 0.0)
-        force_str = ", ".join(f"{value:.3f}" for value in force.tolist())
-        torque_str = ", ".join(f"{value:.3f}" for value in torque.tolist())
+        fz = float(contact_fz[foot_idx].item())
+
+        if foot_name.startswith("F"):
+            front_vertical_support += fz
+        elif foot_name.startswith("R"):
+            rear_vertical_support += fz
+
+        if "L_" in foot_name or foot_name.startswith("L"):
+            left_vertical_support += fz
+        elif "R_" in foot_name or foot_name.startswith("R"):
+            right_vertical_support += fz
+
+    front_load_ratio = front_vertical_support / max(
+        front_vertical_support + rear_vertical_support,
+        1e-6,
+    )
+    left_load_ratio = left_vertical_support / max(
+        left_vertical_support + right_vertical_support,
+        1e-6,
+    )
+
+    root_pos = env.root_states[0, :3].detach().cpu()
+    root_lin_vel_body = env.base_lin_vel[0].detach().cpu()
+    root_ang_vel_body = env.base_ang_vel[0].detach().cpu()
+
+    roll, pitch, yaw = euler_from_quat(env.base_quat)
+    body_rpy_deg = torch.rad2deg(
+        torch.stack([roll[0], pitch[0], yaw[0]])
+    ).detach().cpu()
+
+    sensor_force_local_norm = torch.norm(sensor_wrench_local[:, :3], dim=-1)
+    sensor_force_world_norm = torch.norm(sensor_force_world, dim=-1)
+    sensor_torque_norm = torch.norm(sensor_wrench_local[:, 3:], dim=-1)
+    sensor_wrench_norm = torch.norm(sensor_wrench_local, dim=-1)
+    contact_force_norm = torch.norm(contact_forces_world, dim=-1)
+
+    max_sensor_force_local = float(sensor_force_local_norm.max().item())
+    max_sensor_force_world = float(sensor_force_world_norm.max().item())
+    max_sensor_wrench = float(sensor_wrench_norm.max().item())
+    max_contact_force = float(contact_force_norm.max().item())
+    max_contact_force_cfg = float(env.cfg.rewards.max_contact_force)
+
+    alert_items = []
+    if support_ratio > support_ratio_warn_high:
+        alert_items.append(
+            f"support_ratio={support_ratio:.2f}>{support_ratio_warn_high:.2f}"
+        )
+    if max_contact_force > max_contact_force_warn:
+        alert_items.append(
+            f"max_contact_force={max_contact_force:.1f}>{max_contact_force_warn:.1f}N"
+        )
+    wrench_warn = max_contact_force_cfg * support_ratio_warn_high
+    if max_sensor_wrench > wrench_warn:
+        alert_items.append(
+            f"max_sensor_wrench={max_sensor_wrench:.1f}>{wrench_warn:.1f}"
+        )
+    if abs(float(body_rpy_deg[0].item())) > body_angle_warn_deg:
+        alert_items.append(
+            f"roll={float(body_rpy_deg[0].item()):.1f}>{body_angle_warn_deg:.1f}deg"
+        )
+    if abs(float(body_rpy_deg[1].item())) > body_angle_warn_deg:
+        alert_items.append(
+            f"pitch={float(body_rpy_deg[1].item()):.1f}>{body_angle_warn_deg:.1f}deg"
+        )
+
+    has_alert = len(alert_items) > 0
+
+    should_print_summary = (
+        step_idx == 0
+        or step_idx % summary_interval == 0
+    )
+
+    should_print_alert = has_alert and (
+        not hasattr(env, "_force_diag_last_alert_step")
+        or step_idx - env._force_diag_last_alert_step >= summary_interval
+    )
+
+    should_print_detail = (
+        step_idx == 0
+        or step_idx % detail_interval == 0
+    )
+
+    if should_print_alert:
+        env._force_diag_last_alert_step = step_idx
+
+    if should_print_summary or should_print_alert:
+        alert_text = ""
+        if alert_items:
+            alert_text = " | alerts=[" + "; ".join(alert_items) + "]"
+
         print(
-            f"  {foot_name}: "
-            f"F=[{force_str}] |F|={force_norm:.3f}; "
-            f"T=[{torque_str}] |T|={torque_norm:.3f}; "
-            f"|wrench|={wrench_norm:.3f}; excess={wrench_excess:.3f}"
+            f"[force_diag] step={step_idx:06d} | "
+            f"support_ratio={support_ratio:.2f} "
+            f"vertical_support={total_vertical_support:.1f}N "
+            f"weight={expected_weight:.1f}N | "
+            f"front_load_ratio={front_load_ratio:.2f} "
+            f"left_load_ratio={left_load_ratio:.2f} | "
+            f"max_contact_force={max_contact_force:.1f}N "
+            f"max_sensor_force_world={max_sensor_force_world:.1f}N "
+            f"max_sensor_wrench={max_sensor_wrench:.1f} | "
+            f"sensor_flags={_format_contact_flags(sensor_contact_flags)} "
+            f"contact_flags={_format_contact_flags(contact_force_flags)} | "
+            f"body_rpy_deg=[{_format_values(body_rpy_deg.tolist())}]"
+            f"{alert_text}"
+        )
+
+    if not should_print_detail:
+        return
+
+    print(
+        f"  robot: mass={total_mass:.2f}kg "
+        f"configured_max_contact_force={max_contact_force_cfg:.1f} "
+        f"max_sensor_force_local={max_sensor_force_local:.1f}N"
+    )
+
+    print(
+        f"  base: pos=[{_format_values(root_pos.tolist())}] "
+        f"lin_vel_body=[{_format_values(root_lin_vel_body.tolist())}] "
+        f"ang_vel_body=[{_format_values(root_ang_vel_body.tolist())}]"
+    )
+
+    print("  feet:")
+    for foot_idx, foot_name in enumerate(foot_names):
+        print(
+            f"    {foot_name}: "
+            f"vertical_force={float(contact_fz[foot_idx].item()):7.1f}N "
+            f"contact_force_norm={float(contact_force_norm[foot_idx].item()):7.1f}N "
+            f"sensor_force_world_norm={float(sensor_force_world_norm[foot_idx].item()):7.1f}N "
+            f"sensor_torque_norm={float(sensor_torque_norm[foot_idx].item()):6.2f} "
+            f"sensor_wrench_norm={float(sensor_wrench_norm[foot_idx].item()):7.1f} "
+            f"foot_height={float(foot_state[foot_idx, 2].item()):.3f}m "
+            f"foot_speed={float(foot_speed[foot_idx].item()):.3f}m/s "
+            f"sensor_contact={int(bool(sensor_contact_flags[foot_idx]))} "
+            f"contact_force_contact={int(bool(contact_force_flags[foot_idx]))}"
         )
 
 
