@@ -703,8 +703,8 @@ class ManipLoco(LeggedRobot):
 
         if self.record_video:
             camera_props = gymapi.CameraProperties()
-            camera_props.width = 720
-            camera_props.height = 480
+            camera_props.width = 1920
+            camera_props.height = 1080
             self._rendering_camera_handles = []
             for i in range(self.num_envs):
                 # root_pos = self.root_states[i, :3].cpu().numpy()

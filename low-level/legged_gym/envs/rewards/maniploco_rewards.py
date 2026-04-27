@@ -598,13 +598,6 @@ class ManipLoco_rewards:
         reward = torch.sum((forces - threshold).clamp(min=0.0), dim=-1)
         return reward, reward
 
-    def _reward_robotlab_feet_contact_without_cmd(self):
-        first_contact = self._robotlab_first_contact_from_sensor()
-        reward = torch.sum(first_contact.float(), dim=-1)
-        reward = reward * (self._robotlab_command_norm() < 0.1).float()
-        reward = reward * self._robotlab_upright_gate()
-        return reward, reward
-
     def _reward_robotlab_feet_height_body(self):
         target_height = float(getattr(self.env.cfg.rewards, "robotlab_feet_height_body_target", -0.4))
         tanh_mult = float(getattr(self.env.cfg.rewards, "robotlab_feet_height_tanh_mult", 2.0))
@@ -625,3 +618,153 @@ class ManipLoco_rewards:
         reward = reward * (self._robotlab_command_norm() > 0.1).float()
         reward = reward * self._robotlab_upright_gate()
         return reward, reward
+
+    def _robotlab_clock_gait_weights(self):
+        # robot_lab-clock：根据现有 desired_contact_states 生成 swing / stance 权重。
+        # desired_contact_states 接近 0 表示该脚处于 swing，相应地惩罚触地力；
+        # desired_contact_states 接近 1 表示该脚处于 stance，相应地惩罚滑动和接触不足；
+        # 中间过渡区不强惩罚，避免相位切换瞬间 reward 过硬。
+        desired_contact = self.env.desired_contact_states.clamp(0.0, 1.0)
+
+        transition_lower = getattr(self.env.cfg.rewards, "gait_transition_lower", 0.1)
+        transition_upper = getattr(self.env.cfg.rewards, "gait_transition_upper", 0.9)
+
+        swing_weight = (
+            (transition_lower - desired_contact)
+            / max(transition_lower, 1e-6)
+        ).clamp(0.0, 1.0)
+
+        stance_weight = (
+            (desired_contact - transition_upper)
+            / max(1.0 - transition_upper, 1e-6)
+        ).clamp(0.0, 1.0)
+
+        return swing_weight, stance_weight
+
+    def _reward_robotlab_clock_swing_force(self):
+        # robot_lab-clock：跟随 clock_inputs / desired_contact_states。
+        # 当某只脚处于 swing 相位时，惩罚它产生接触力。
+        # 静止时不使用 clock gait，避免静止四腿着地和 clock swing 相位冲突。
+        if not self.env.cfg.env.observe_gait_commands:
+            zero = torch.zeros(self.env.num_envs, device=self.env.device)
+            return zero, zero
+
+        walking_mask = self.env._get_walking_cmd_mask()
+        if not torch.any(walking_mask):
+            zero = torch.zeros(self.env.num_envs, device=self.env.device)
+            return zero, zero
+
+        swing_weight, _ = self._robotlab_clock_gait_weights()
+
+        foot_forces = torch.norm(
+            self.env.contact_forces[:, self.env.feet_indices, :],
+            dim=-1,
+        )
+
+        gait_force_sigma = float(self.env.cfg.rewards.gait_force_sigma)
+
+        penalty = swing_weight * (
+            1.0 - torch.exp(-foot_forces ** 2 / gait_force_sigma)
+        )
+
+        rew = torch.sum(penalty, dim=1) / 4.0
+        metric = torch.sum(swing_weight * foot_forces, dim=1) / torch.sum(
+            swing_weight,
+            dim=1,
+        ).clamp(min=1.0)
+
+        rew[~walking_mask] = 0.0
+        metric[~walking_mask] = 0.0
+
+        return rew, metric
+
+    def _reward_robotlab_clock_stance_vel(self):
+        # robot_lab-clock：跟随 clock_inputs / desired_contact_states。
+        # 当某只脚处于 stance 相位时，惩罚它在地面上滑动。
+        # 静止时不使用该项，静止四脚接触由 robotlab_feet_contact_without_cmd 处理。
+        if not self.env.cfg.env.observe_gait_commands:
+            zero = torch.zeros(self.env.num_envs, device=self.env.device)
+            return zero, zero
+
+        walking_mask = self.env._get_walking_cmd_mask()
+        if not torch.any(walking_mask):
+            zero = torch.zeros(self.env.num_envs, device=self.env.device)
+            return zero, zero
+
+        _, stance_weight = self._robotlab_clock_gait_weights()
+
+        foot_velocities = torch.norm(
+            self.env.foot_velocities,
+            dim=2,
+        ).view(self.env.num_envs, -1)
+
+        gait_vel_sigma = float(self.env.cfg.rewards.gait_vel_sigma)
+
+        penalty = stance_weight * (
+            1.0 - torch.exp(-foot_velocities ** 2 / gait_vel_sigma)
+        )
+
+        rew = torch.sum(penalty, dim=1) / 4.0
+        metric = torch.sum(stance_weight * foot_velocities, dim=1) / torch.sum(
+            stance_weight,
+            dim=1,
+        ).clamp(min=1.0)
+
+        rew[~walking_mask] = 0.0
+        metric[~walking_mask] = 0.0
+
+        return rew, metric
+
+    def _reward_robotlab_clock_stance_contact(self):
+        # robot_lab-clock：跟随 clock_inputs / desired_contact_states。
+        # 当某只脚处于 stance 相位时，轻微惩罚它没有形成足够接触力。
+        # 该项只作为辅助，权重应小于 swing_force 和 stance_vel。
+        if not self.env.cfg.env.observe_gait_commands:
+            zero = torch.zeros(self.env.num_envs, device=self.env.device)
+            return zero, zero
+
+        walking_mask = self.env._get_walking_cmd_mask()
+        if not torch.any(walking_mask):
+            zero = torch.zeros(self.env.num_envs, device=self.env.device)
+            return zero, zero
+
+        _, stance_weight = self._robotlab_clock_gait_weights()
+
+        foot_forces = torch.norm(
+            self.env.contact_forces[:, self.env.feet_indices, :],
+            dim=-1,
+        )
+
+        gait_force_sigma = float(self.env.cfg.rewards.gait_force_sigma)
+
+        penalty = stance_weight * torch.exp(
+            -foot_forces ** 2 / gait_force_sigma
+        )
+
+        rew = torch.sum(penalty, dim=1) / 4.0
+        metric = torch.sum(stance_weight * foot_forces, dim=1) / torch.sum(
+            stance_weight,
+            dim=1,
+        ).clamp(min=1.0)
+
+        rew[~walking_mask] = 0.0
+        metric[~walking_mask] = 0.0
+
+        return rew, metric
+
+    def _reward_robotlab_feet_contact_without_cmd(self):
+        # robot_lab：无运动命令时奖励足端保持接触。
+        # 这里不使用 first-contact 事件，而是奖励当前四脚着地状态。
+        # 原因是静止站立时，四只脚稳定接触后不会持续产生 first-contact，
+        # 如果只奖励 first-contact，静止站稳后 reward 反而没有持续信号。
+        foot_contacts = self.env.foot_contacts_from_sensor.float()
+
+        rew = torch.sum(foot_contacts, dim=1) / foot_contacts.shape[1]
+
+        standing_mask = ~self.env._get_walking_cmd_mask()
+        rew[~standing_mask] = 0.0
+
+        rew = rew * self._robotlab_upright_gate()
+        metric = rew
+
+        return rew, metric

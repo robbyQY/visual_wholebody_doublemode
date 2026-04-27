@@ -322,6 +322,10 @@ def play(args):
     if args.flat_terrain:
         env_cfg.terrain.height = [0.0, 0.0]
 
+    if args.record_video and args.seed is None:
+        args.seed = -1
+        env_cfg.seed = -1
+
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
@@ -368,9 +372,13 @@ def play(args):
     mp4_writers = []
     if args.record_video:
         import imageio
+        from datetime import datetime
+
         env.enable_viewer_sync = False
+        video_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         for i in range(env.num_envs):
-            video_name = args.exptid+ f'-{i}-' + str(checkpoint) +".mp4"
+            video_name = args.exptid + f'-{i}-' + str(checkpoint) + f"-{video_timestamp}.mp4"
             run_name = log_pth.split("/")[-1]
             path = f"../../logs/videos/{run_name}"
             if not os.path.exists(path):

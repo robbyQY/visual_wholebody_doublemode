@@ -72,3 +72,4 @@ Thumbs.db
 paper
 tmp*
 *collision_visual*
+.run_train_queue

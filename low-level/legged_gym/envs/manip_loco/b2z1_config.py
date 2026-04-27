@@ -226,6 +226,9 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
             robotlab_feet_contact_without_cmd = 0.0 # robot_lab：无运动命令时奖励足端接触
             robotlab_feet_height_body = 0.0 # robot_lab：惩罚足端在机体系下偏离目标高度
             robotlab_upward = 0.0 # robot_lab：奖励机身朝上
+            robotlab_clock_swing_force = 0.0 # robot_lab-clock：跟随clock，惩罚摆动足触地力过大
+            robotlab_clock_stance_vel = 0.0 # robot_lab-clock：跟随clock，惩罚支撑足滑动过快
+            robotlab_clock_stance_contact = 0.0 # robot_lab-clock：跟随clock，轻微惩罚支撑足接触力不足
 
         class scale_presets(ManipLocoRoughCfg.rewards.scale_presets):
             legacy = {
@@ -320,6 +323,9 @@ class B2Z1RoughCfg(ManipLocoRoughCfg):
                 "robotlab_feet_contact_without_cmd": 0.1,
                 "robotlab_feet_height_body": -5.0,
                 "robotlab_upward": 3.0,
+                "robotlab_clock_swing_force": -2.0,
+                "robotlab_clock_stance_vel": -2.0,
+                "robotlab_clock_stance_contact": -0.5,
             }
 
         _selected_reward_scale_preset = getattr(scale_presets, reward_scale_preset, None)

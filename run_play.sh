@@ -48,6 +48,7 @@ TRUNK_FOLLOW_RATIO="0.0"  # 0.0~1.0
 PRINT_FORCE_SENSOR_EVERY=""  # empty (disable) | e.g. 10
 STATIC_DEFAULT_POSE=false
 USE_JIT=false
+RECORD_VIDEO=false
 
 if [[ "${STATIC_DEFAULT_POSE}" != true ]]; then
   [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
@@ -74,4 +75,5 @@ python "play.py" \
   $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \
   $([[ -n "${CURRICULUM_ITER}" ]] && echo --curriculum_iter "${CURRICULUM_ITER}") \
   $([[ -n "${CURRICULUM_PROGRESS}" ]] && echo --curriculum_progress "${CURRICULUM_PROGRESS}") \
-  $([[ "${USE_JIT}" == true ]] && echo --use_jit)
+  $([[ "${USE_JIT}" == true ]] && echo --use_jit) \
+  $([[ "${RECORD_VIDEO}" == true ]] && echo --record_video)
