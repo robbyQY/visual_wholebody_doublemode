@@ -484,6 +484,9 @@ prepare_training_submission() {
     "${ENABLE_DYNAMIC_GAIT_FREQUENCY}" \
     "${ROBOT_ABLATION}" \
     "${LEG_COLLISION_SCALE}")"
+  if [[ "${TRAIN_MODE}" == "resume" && -n "${LOAD_EXPTID}" ]]; then
+    EXPTID="${LOAD_EXPTID}"
+  fi
 
   TOTAL_AVAILABLE_GPUS="$(get_total_gpu_count)"
   if ! [[ "${TOTAL_AVAILABLE_GPUS}" =~ ^[0-9]+$ ]]; then

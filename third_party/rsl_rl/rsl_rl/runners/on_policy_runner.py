@@ -100,6 +100,13 @@ class OnPolicyRunner:
 
         self.alg.set_arm_default_coeffs(self.env.p_gains[12:], self.env.d_gains[12:], self.env.default_dof_pos[-7:-2])
 
+    def _sync_env_training_progress(self):
+        env_steps = int(self.current_learning_iteration) * int(self.num_steps_per_env)
+        if hasattr(self.env, "global_steps"):
+            self.env.global_steps = env_steps
+        if hasattr(self.env, "common_step_counter"):
+            self.env.common_step_counter = env_steps
+
     def _apply_env_curricula(self, iteration, total_iterations):
         self.curriculum_state = {}
 
@@ -143,6 +150,7 @@ class OnPolicyRunner:
         #     self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
+        self._sync_env_training_progress()
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -202,6 +210,9 @@ class OnPolicyRunner:
             
             # mean_value_loss, mean_surrogate_loss, mean_arm_torques_loss, value_mixing_ratio, torque_supervision_weight, mean_priv_reg_loss, priv_reg_coef = self.alg.update()
             if hist_encoding:
+                value_mixing_ratio = self.alg.get_value_mixing_ratio()
+                priv_reg_coef = self.alg.get_priv_reg_coef()
+                torque_supervision_weight = self.alg.get_torque_supervision_weight() if self.alg.torque_supervision else 0
                 mean_hist_latent_loss = self.alg.update_dagger()
             else:
                 mean_value_loss, mean_surrogate_loss, mean_arm_torques_loss, value_mixing_ratio, torque_supervision_weight, mean_priv_reg_loss, priv_reg_coef = self.alg.update()

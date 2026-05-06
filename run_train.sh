@@ -22,7 +22,7 @@ PROJ_NAME=""
 
 # Training control
 TRAIN_MODE="fresh"      # fresh | resume | load
-LOAD_EXPTID=""          # used when TRAIN_MODE=load
+LOAD_EXPTID=""          # used when TRAIN_MODE=load or to select an exact resume run
 LOAD_CKPT="-1"          # used when TRAIN_MODE=load
 SEED=""
 MAX_ITERATIONS=""
