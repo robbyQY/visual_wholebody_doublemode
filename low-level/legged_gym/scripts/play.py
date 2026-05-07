@@ -288,11 +288,26 @@ def _apply_static_default_pose(env, env_ids=None):
     env.gym.refresh_rigid_body_state_tensor(env.sim)
     env.gym.refresh_jacobian_tensors(env.sim)
 
+def _checkpoint_number_from_path(path):
+    return int(os.path.basename(path).split("_")[-1].split(".")[0])
+
+def _resolve_playback_checkpoint(log_pth, args, train_cfg):
+    checkpoint = int(args.checkpoint)
+    if checkpoint == -1:
+        checkpoint = int(train_cfg.runner.checkpoint)
+    if checkpoint == -1:
+        return _checkpoint_number_from_path(get_load_path(log_pth, checkpoint=-1))
+    return checkpoint
+
 def play(args):
     log_pth = get_run_log_dir(args.proj_name, args.exptid)
     args, metadata = apply_checkpoint_features_from_run(args, log_pth)
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     apply_play_env_schedules_from_metadata(env_cfg, metadata)
+    if not args.static_default_pose:
+        args.checkpoint = _resolve_playback_checkpoint(log_pth, args, train_cfg)
+        if args.curriculum_iter is None:
+            args.curriculum_iter = float(args.checkpoint)
     configure_playback_curriculum(env_cfg, args, metadata=metadata)
     # override some parameters for testing
     env_cfg.env.num_envs = 1

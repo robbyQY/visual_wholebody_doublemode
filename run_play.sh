@@ -42,15 +42,17 @@ ACTION_DELAY_MODE="auto"  # auto | undelayed | delayed
 EE_GOAL_OBS_MODE=""  # empty (follow checkpoint) | command | arm_base_target (official ckpt)
 ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mass | inertial | structure | legs-inertial, etc.; combine with "," or "+"
 LEG_COLLISION_SCALE=""  # empty (follow checkpoint) | e.g. 0.9
-CURRICULUM_ITER=""  # empty (start from curriculum step 0) | e.g. 3000
-CURRICULUM_PROGRESS=""  # empty | normalized progress in [0, 1], e.g. 0.6
+CURRICULUM_ITER=""  # empty -> CHECKPOINT | e.g. 3000
 TRUNK_FOLLOW_RATIO="0.0"  # 0.0~1.0
 PRINT_FORCE_SENSOR_EVERY=""  # empty (disable) | e.g. 10
 STATIC_DEFAULT_POSE=false
 USE_JIT=false
 RECORD_VIDEO=false
+NUM_ENVS="5"  # only used when RECORD_VIDEO=true
 
-if [[ "${STATIC_DEFAULT_POSE}" != true ]]; then
+EFFECTIVE_CHECKPOINT="${CHECKPOINT:--1}"
+
+if [[ "${STATIC_DEFAULT_POSE}" != true && "${EFFECTIVE_CHECKPOINT}" != "-1" ]]; then
   [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
 fi
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
@@ -61,7 +63,8 @@ python "play.py" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
   --proj_name "${PROJ_NAME}" \
-  --checkpoint "${CHECKPOINT}" \
+  --checkpoint "${EFFECTIVE_CHECKPOINT}" \
+  $([[ "${RECORD_VIDEO}" == true ]] && echo --num_envs "${NUM_ENVS}") \
   --sim_device "cuda:${GPU_ID}" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
@@ -74,6 +77,5 @@ python "play.py" \
   $([[ -n "${PRINT_FORCE_SENSOR_EVERY}" ]] && echo --print_force_sensor_every "${PRINT_FORCE_SENSOR_EVERY}") \
   $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \
   $([[ -n "${CURRICULUM_ITER}" ]] && echo --curriculum_iter "${CURRICULUM_ITER}") \
-  $([[ -n "${CURRICULUM_PROGRESS}" ]] && echo --curriculum_progress "${CURRICULUM_PROGRESS}") \
   $([[ "${USE_JIT}" == true ]] && echo --use_jit) \
   $([[ "${RECORD_VIDEO}" == true ]] && echo --record_video)

@@ -480,28 +480,14 @@ def configure_playback_curriculum(env_cfg, args, metadata=None, verbose=True):
         return None
 
     curriculum_iter = getattr(args, "curriculum_iter", None)
-    curriculum_progress = getattr(args, "curriculum_progress", None)
-    if curriculum_iter is not None and curriculum_progress is not None:
-        raise ValueError("Use only one of --curriculum_iter or --curriculum_progress.")
-
-    if curriculum_iter is None and curriculum_progress is None:
+    if curriculum_iter is None:
         return None
 
     total_iterations = None
     if metadata is not None:
         total_iterations = metadata.get("train_cfg", {}).get("runner", {}).get("max_iterations")
 
-    if curriculum_progress is not None:
-        curriculum_progress = float(curriculum_progress)
-        if not (0.0 <= curriculum_progress <= 1.0):
-            raise ValueError(f"--curriculum_progress must be within [0, 1], got {curriculum_progress}.")
-        if total_iterations is None:
-            raise ValueError(
-                "Cannot use --curriculum_progress because max_iterations is missing from run metadata."
-            )
-        curriculum_iter = curriculum_progress * float(total_iterations)
-    else:
-        curriculum_iter = float(curriculum_iter)
+    curriculum_iter = float(curriculum_iter)
 
     setattr(env_cfg.commands, "curriculum_playback_counter", curriculum_iter)
     setattr(
@@ -851,7 +837,6 @@ def get_args(test=False):
         {"name": "--ang_vel_yaw_schedule", "type": str, "help": "Curriculum for |ang_vel_yaw| command range as comma-separated values: start,end or start,end,start_iter,end_iter."},
         {"name": "--non_omni_pos_y_schedule", "type": str, "help": "Curriculum for the symmetric non-omnidirectional EE goal yaw range magnitude as comma-separated values: start,end or start,end,start_iter,end_iter. Applied as [-value, value]."},
         {"name": "--curriculum_iter", "type": float, "help": "Playback-only schedule counter used to initialize command and non-omni goal-yaw curricula at a specific training iteration."},
-        {"name": "--curriculum_progress", "type": float, "help": "Playback-only normalized schedule progress in [0, 1]. Uses the checkpoint run's max_iterations from run metadata."},
         {"name": "--mixing_schedule", "type": str, "help": "Value mixing schedule as comma-separated values: target,start_iter,end_iter or start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedule", "type": str, "help": "Privileged-reference regularization schedule as comma-separated values: start,end,start_iter,end_iter."},
         {"name": "--priv_reg_coef_schedual", "type": str, "help": "Deprecated alias for --priv_reg_coef_schedule."},

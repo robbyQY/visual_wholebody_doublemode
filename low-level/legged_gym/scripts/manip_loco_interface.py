@@ -111,7 +111,7 @@ class ManipLoco_Policy():
             print("Saved actor to: ", path + "/" + model_name + "_actor.pt")
 
         if self.args.use_jit:
-            path = os.path.join(log_pth, "traced", self.args.exptid + "_" + str(self.args.checkpoint) + "_jit.pt")
+            path = os.path.join(log_pth, "traced", self.args.exptid + "_" + str(checkpoint) + "_jit.pt")
             print("Loading jit for policy: ", path)
             self.policy = torch.jit.load(path, map_location=ppo_runner.device)
 

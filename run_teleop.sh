@@ -81,7 +81,11 @@ ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mas
 LEG_COLLISION_SCALE=""  # empty (follow checkpoint) | e.g. 0.9
 USE_JIT=false
 
-[[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
+EFFECTIVE_CHECKPOINT="${CHECKPOINT:--1}"
+
+if [[ "${EFFECTIVE_CHECKPOINT}" != "-1" ]]; then
+  [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
+fi
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
 cd "${SCRIPT_DIR}"
@@ -90,7 +94,7 @@ python "manip_loco_interface.py" \
   --exptid "${EXPTID}" \
   --task "${TASK}" \
   --proj_name "${PROJ_NAME}" \
-  --checkpoint "${CHECKPOINT}" \
+  --checkpoint "${EFFECTIVE_CHECKPOINT}" \
   --sim_device "cuda:${GPU_ID}" \
   --rl_device "cuda:${GPU_ID}" \
   $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
