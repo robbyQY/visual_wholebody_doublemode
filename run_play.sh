@@ -32,9 +32,8 @@ LOG_ROOT="/data/logs"
 TASK="b1z1"
 PROJ_NAME="${TASK}-low"
 EXPTID="train_default"
+EXPTIDS=()  # optional: ("run_a" "run_b"); RECORD_VIDEO=false uses only the first
 CHECKPOINT="45000"
-CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${EXPTID}"
-SRC_CKPT="${CKPT_DIR}/model_${CHECKPOINT}.pt"
 
 HEADLESS=false
 VIEWER_DISPLAY_MODE="mesh"  # mesh | collision；只影响viewer显示，不影响实际动力学
@@ -52,30 +51,45 @@ NUM_ENVS="5"  # only used when RECORD_VIDEO=true
 
 EFFECTIVE_CHECKPOINT="${CHECKPOINT:--1}"
 
-if [[ "${STATIC_DEFAULT_POSE}" != true && "${EFFECTIVE_CHECKPOINT}" != "-1" ]]; then
-  [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
+PLAY_EXPTIDS=()
+if (( ${#EXPTIDS[@]} > 0 )); then
+  PLAY_EXPTIDS=("${EXPTIDS[@]}")
+else
+  PLAY_EXPTIDS=("${EXPTID}")
 fi
+if [[ "${RECORD_VIDEO}" != true && ${#PLAY_EXPTIDS[@]} -gt 1 ]]; then
+  PLAY_EXPTIDS=("${PLAY_EXPTIDS[0]}")
+fi
+
 export LEGGED_GYM_LOG_ROOT="${LOG_ROOT}"
 
 cd "${SCRIPT_DIR}"
 
-python "play.py" \
-  --exptid "${EXPTID}" \
-  --task "${TASK}" \
-  --proj_name "${PROJ_NAME}" \
-  --checkpoint "${EFFECTIVE_CHECKPOINT}" \
-  $([[ "${RECORD_VIDEO}" == true ]] && echo --num_envs "${NUM_ENVS}") \
-  --sim_device "cuda:${GPU_ID}" \
-  --rl_device "cuda:${GPU_ID}" \
-  $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
-  $([[ "${HEADLESS}" == false ]] && echo --viewer_display_mode "${VIEWER_DISPLAY_MODE}") \
-  --action_delay_mode "${ACTION_DELAY_MODE}" \
-  $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
-  $([[ -n "${ROBOT_ABLATION}" ]] && echo --robot_ablation "${ROBOT_ABLATION}") \
-  $([[ -n "${LEG_COLLISION_SCALE}" ]] && echo --leg_collision_scale "${LEG_COLLISION_SCALE}") \
-  $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
-  $([[ -n "${PRINT_FORCE_SENSOR_EVERY}" ]] && echo --print_force_sensor_every "${PRINT_FORCE_SENSOR_EVERY}") \
-  $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \
-  $([[ -n "${CURRICULUM_ITER}" ]] && echo --curriculum_iter "${CURRICULUM_ITER}") \
-  $([[ "${USE_JIT}" == true ]] && echo --use_jit) \
-  $([[ "${RECORD_VIDEO}" == true ]] && echo --record_video)
+for PLAY_EXPTID in "${PLAY_EXPTIDS[@]}"; do
+  CKPT_DIR="${LOG_ROOT}/${PROJ_NAME}/${PLAY_EXPTID}"
+  SRC_CKPT="${CKPT_DIR}/model_${EFFECTIVE_CHECKPOINT}.pt"
+  if [[ "${STATIC_DEFAULT_POSE}" != true && "${EFFECTIVE_CHECKPOINT}" != "-1" ]]; then
+    [[ -f "${SRC_CKPT}" ]] || { echo "Checkpoint not found: ${SRC_CKPT}"; exit 1; }
+  fi
+
+  python "play.py" \
+    --exptid "${PLAY_EXPTID}" \
+    --task "${TASK}" \
+    --proj_name "${PROJ_NAME}" \
+    --checkpoint "${EFFECTIVE_CHECKPOINT}" \
+    $([[ "${RECORD_VIDEO}" == true ]] && echo --num_envs "${NUM_ENVS}") \
+    --sim_device "cuda:${GPU_ID}" \
+    --rl_device "cuda:${GPU_ID}" \
+    $([[ "${HEADLESS}" == false ]] && echo --no-headless) \
+    $([[ "${HEADLESS}" == false ]] && echo --viewer_display_mode "${VIEWER_DISPLAY_MODE}") \
+    --action_delay_mode "${ACTION_DELAY_MODE}" \
+    $([[ -n "${EE_GOAL_OBS_MODE}" ]] && echo --ee_goal_obs_mode "${EE_GOAL_OBS_MODE}") \
+    $([[ -n "${ROBOT_ABLATION}" ]] && echo --robot_ablation "${ROBOT_ABLATION}") \
+    $([[ -n "${LEG_COLLISION_SCALE}" ]] && echo --leg_collision_scale "${LEG_COLLISION_SCALE}") \
+    $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
+    $([[ -n "${PRINT_FORCE_SENSOR_EVERY}" ]] && echo --print_force_sensor_every "${PRINT_FORCE_SENSOR_EVERY}") \
+    $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \
+    $([[ -n "${CURRICULUM_ITER}" ]] && echo --curriculum_iter "${CURRICULUM_ITER}") \
+    $([[ "${USE_JIT}" == true ]] && echo --use_jit) \
+    $([[ "${RECORD_VIDEO}" == true ]] && echo --record_video)
+done

@@ -177,7 +177,7 @@ class ManipLoco(LeggedRobot):
         self.last_root_vel[:] = self.root_states[:, 7:13]
         self.last_torques[:] = self.torques[:]
 
-        if (self.viewer and self.enable_viewer_sync and self.debug_viz) or self.record_video:
+        if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self.gym.clear_lines(self.viewer)
             self._draw_ee_goal_curr()
             self._draw_ee_goal_traj()
@@ -1474,12 +1474,14 @@ class ManipLoco(LeggedRobot):
             arm_base_quat = torch.where(self.goal_height_follow_mask.unsqueeze(1), self.base_quat, self.base_yaw_quat)
         return self.base_pos + quat_apply(arm_base_quat, self.arm_base_offset)
 
-    def _draw_collision_bbox(self):
+    def _draw_collision_bbox(self, env_ids=None):
         """Draws the red forbidden box in world coordinates.
 
         The box corners are defined by `collision_lower_limits/upper_limits` in the goal local frame,
         then transformed into world with the active goal reference frame.
         """
+        if env_ids is None:
+            env_ids = range(self.num_envs)
 
         center = self.get_goal_center_offset_local()
         bbox0 = center + self.collision_upper_limits
@@ -1489,14 +1491,14 @@ class ManipLoco(LeggedRobot):
         goal_ref_origin = self.get_goal_reference_origin()
         goal_ref_quat = self.get_goal_reference_quat()
 
-        for i in range(self.num_envs):
+        for i in env_ids:
             bbox_geom = gymutil.WireframeBBoxGeometry(bboxes[i], None, color=(1, 0, 0))
             quat = goal_ref_quat[i]
             r = gymapi.Quat(quat[0], quat[1], quat[2], quat[3])
             pose0 = gymapi.Transform(gymapi.Vec3(goal_ref_origin[i, 0], goal_ref_origin[i, 1], goal_ref_origin[i, 2]), r=r)
             gymutil.draw_lines(bbox_geom, self.gym, self.viewer, self.envs[i], pose=pose0) 
 
-    def _draw_ee_goal_curr(self):
+    def _draw_ee_goal_curr(self, env_ids=None):
         """Draws the current goal markers in world coordinates.
 
         Yellow = current EE target point in world.
@@ -1504,6 +1506,9 @@ class ManipLoco(LeggedRobot):
         White = root/base pose in world.
         Blue = measured gripper position in world.
         """
+        if env_ids is None:
+            env_ids = range(self.num_envs)
+
         sphere_geom = gymutil.WireframeSphereGeometry(0.05, 4, 4, None, color=(1, 1, 0))
         sphere_geom_root = gymutil.WireframeSphereGeometry(0.06, 16, 16, None, color=(1, 1, 1))
 
@@ -1515,11 +1520,12 @@ class ManipLoco(LeggedRobot):
 
         sphere_geom_origin = gymutil.WireframeSphereGeometry(0.1, 8, 8, None, color=(0, 1, 0))
         sphere_pose = gymapi.Transform(gymapi.Vec3(0, 0, 0), r=None)
-        gymutil.draw_lines(sphere_geom_origin, self.gym, self.viewer, self.envs[0], sphere_pose)
+        if 0 in env_ids:
+            gymutil.draw_lines(sphere_geom_origin, self.gym, self.viewer, self.envs[0], sphere_pose)
 
         axes_geom = gymutil.AxesGeometry(scale=0.2)
 
-        for i in range(self.num_envs):
+        for i in env_ids:
             sphere_pose = gymapi.Transform(gymapi.Vec3(self.curr_ee_goal_cart_world[i, 0], self.curr_ee_goal_cart_world[i, 1], self.curr_ee_goal_cart_world[i, 2]), r=None)
             gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose) 
             
@@ -1540,8 +1546,11 @@ class ManipLoco(LeggedRobot):
                                     r=gymapi.Quat(self.ee_goal_orn_quat[i, 0], self.ee_goal_orn_quat[i, 1], self.ee_goal_orn_quat[i, 2], self.ee_goal_orn_quat[i, 3]))
             gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[i], pose)
 
-    def _draw_ee_goal_traj(self):
+    def _draw_ee_goal_traj(self, env_ids=None):
         """Draws the sampled EE goal trajectory in world coordinates."""
+        if env_ids is None:
+            env_ids = range(self.num_envs)
+
         sphere_geom = gymutil.WireframeSphereGeometry(0.005, 8, 8, None, color=(1, 0, 0))
         sphere_geom_yellow = gymutil.WireframeSphereGeometry(0.01, 16, 16, None, color=(1, 1, 0))
 
@@ -1558,7 +1567,7 @@ class ManipLoco(LeggedRobot):
             ee_target_cart = sphere2cart(ee_target_all_sphere[i])
             ee_target_all_cart_world[i] = quat_apply(goal_ref_quat, ee_target_cart)
         ee_target_all_cart_world += goal_ref_center[None, :, :]
-        for i in range(self.num_envs):
+        for i in env_ids:
             for j in range(10):
                 pose = gymapi.Transform(gymapi.Vec3(ee_target_all_cart_world[j, i, 0], ee_target_all_cart_world[j, i, 1], ee_target_all_cart_world[j, i, 2]), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], pose)
@@ -1830,17 +1839,22 @@ class ManipLoco(LeggedRobot):
     def render_record(self, mode="rgb_array"):
         if self.global_steps % 2 == 0:
             self.gym.step_graphics(self.sim)
-            self.gym.render_all_camera_sensors(self.sim)
             imgs = []
             for i in range(self.num_envs):
                 cam = self._rendering_camera_handles[i]
                 root_pos = self.root_states[i, :3].cpu().numpy()
                 cam_pos = root_pos + np.array([0, 2, 1])
                 self.gym.set_camera_location(cam, self.envs[i], gymapi.Vec3(*cam_pos), gymapi.Vec3(*root_pos))
+                self.gym.clear_lines(self.viewer)
+                self._draw_ee_goal_curr(env_ids=[i])
+                self._draw_ee_goal_traj(env_ids=[i])
+                self._draw_collision_bbox(env_ids=[i])
+                self.gym.render_all_camera_sensors(self.sim)
                 
                 img = self.gym.get_camera_image(self.sim, self.envs[i], cam, gymapi.IMAGE_COLOR)
                 w, h = img.shape
                 imgs.append(img.reshape([w, h // 4, 4]))
+            self.gym.clear_lines(self.viewer)
             return imgs
         return None
 
