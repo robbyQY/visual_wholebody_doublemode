@@ -315,7 +315,8 @@ def play(args):
 
     env_cfg.terrain.num_rows = 6
     env_cfg.terrain.num_cols = 3
-    # env_cfg.env.episode_length_s = 10000
+    if args.episode_length_s is not None:
+        env_cfg.env.episode_length_s = float(args.episode_length_s)
     env_cfg.domain_rand.push_robots = False
     # env_cfg.domain_rand.push_interval_s = 2
     env_cfg.domain_rand.randomize_base_mass = True #False

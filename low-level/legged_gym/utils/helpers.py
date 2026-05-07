@@ -827,6 +827,7 @@ def get_args(test=False):
         {"name": "--vel_obs", "action": "store_true", "default": False,  "help": "Control Pitch"},
         {"name": "--mixed_height_reference", "action": "store_true", "default": None, "help": "Train both z-invariant and trunk-height-following goal modes"},
         {"name": "--trunk_follow_ratio", "type": float, "help": "Fraction of trunk-height-following goal episodes when mixed_height_reference is enabled"},
+        {"name": "--episode_length_s", "type": float, "help": "Playback-only episode length in seconds. Overrides env.episode_length_s before creating the environment."},
         {"name": "--omnidirectional_pos_y", "action": "store_true", "default": None, "help": "Sample end-effector goal yaw omnidirectionally, using pos_y as a relative-yaw window"},
         {"name": "--mount_deg", "type": int, "choices": [0, 90, 180, 270], "help": "Arm mounting yaw in degrees. Selects the generated URDF and matching sampling offset for tasks that enable mount_urdf_generator."},
         {"name": "--mount_x", "type": float, "help": "Arm mounting x position in the base frame. Selects a generated URDF for tasks that enable mount_urdf_generator."},

@@ -43,6 +43,7 @@ ROBOT_ABLATION=""  # empty (follow checkpoint) | none | legs | trunk | arm | mas
 LEG_COLLISION_SCALE=""  # empty (follow checkpoint) | e.g. 0.9
 CURRICULUM_ITER=""  # empty -> CHECKPOINT | e.g. 3000
 TRUNK_FOLLOW_RATIO="0.0"  # 0.0~1.0
+EPISODE_LENGTH_S=""  # empty -> task config default (10s) | e.g. 20
 PRINT_FORCE_SENSOR_EVERY=""  # empty (disable) | e.g. 10
 STATIC_DEFAULT_POSE=false
 USE_JIT=false
@@ -87,6 +88,7 @@ for PLAY_EXPTID in "${PLAY_EXPTIDS[@]}"; do
     $([[ -n "${ROBOT_ABLATION}" ]] && echo --robot_ablation "${ROBOT_ABLATION}") \
     $([[ -n "${LEG_COLLISION_SCALE}" ]] && echo --leg_collision_scale "${LEG_COLLISION_SCALE}") \
     $([[ -n "${TRUNK_FOLLOW_RATIO}" ]] && echo --trunk_follow_ratio "${TRUNK_FOLLOW_RATIO}") \
+    $([[ -n "${EPISODE_LENGTH_S}" ]] && echo --episode_length_s "${EPISODE_LENGTH_S}") \
     $([[ -n "${PRINT_FORCE_SENSOR_EVERY}" ]] && echo --print_force_sensor_every "${PRINT_FORCE_SENSOR_EVERY}") \
     $([[ "${STATIC_DEFAULT_POSE}" == true ]] && echo --static_default_pose) \
     $([[ -n "${CURRICULUM_ITER}" ]] && echo --curriculum_iter "${CURRICULUM_ITER}") \
