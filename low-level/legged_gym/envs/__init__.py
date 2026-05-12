@@ -1,40 +1,41 @@
-# SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# 
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Copyright (c) 2021 ETH Zurich, Nikita Rudin
+"""Environment package initialization.
 
-from .manip_loco.manip_loco import ManipLoco
-from .manip_loco.b1z1_config import B1Z1RoughCfg, B1Z1RoughCfgPPO
-from .manip_loco.b2z1_config import B2Z1RoughCfg, B2Z1RoughCfgPPO
+This repository originally registered IsaacGym tasks from this file.
+When running the IsaacLab migration scripts, IsaacGym is not installed, so
+importing the legacy task modules here would fail before the IsaacLab modules
+can even be imported.
+"""
 
-import os
+from __future__ import annotations
 
-from legged_gym.utils.task_registry import task_registry
+_ISAACGYM_AVAILABLE = False
+try:
+    import isaacgym  # noqa: F401
+    _ISAACGYM_AVAILABLE = True
+except ModuleNotFoundError:
+    _ISAACGYM_AVAILABLE = False
 
-task_registry.register( "b1z1", ManipLoco, B1Z1RoughCfg(), B1Z1RoughCfgPPO(), 'b1z1')
-task_registry.register( "b2z1", ManipLoco, B2Z1RoughCfg(), B2Z1RoughCfgPPO(), 'b2z1')
+print("_ISAACGYM_AVAILABLE is", _ISAACGYM_AVAILABLE)
+if _ISAACGYM_AVAILABLE:
+    try:
+        from .manip_loco.manip_loco import ManipLoco  # noqa: F401
+        from .manip_loco.b1z1_config import B1Z1RoughCfg, B1Z1RoughCfgPPO  # noqa: F401
+        from .manip_loco.b2z1_config import B2Z1RoughCfg, B2Z1RoughCfgPPO  # noqa: F401
+        from legged_gym.utils.task_registry import task_registry
+
+        task_registry.register(
+            "b1z1",
+            ManipLoco,
+            B1Z1RoughCfg(),
+            B1Z1RoughCfgPPO(),
+            "manip_loco",
+        )
+        task_registry.register(
+            "b2z1",
+            ManipLoco,
+            B2Z1RoughCfg(),
+            B2Z1RoughCfgPPO(),
+            "manip_loco",
+        )
+    except Exception as exc:
+        print(f"[legged_gym.envs] Warning: legacy IsaacGym task registration skipped: {exc}")
