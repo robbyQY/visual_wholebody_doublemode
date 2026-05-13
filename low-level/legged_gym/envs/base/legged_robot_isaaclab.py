@@ -32,7 +32,11 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
         self.num_actions = int(cfg.action_space)
         self.num_obs = int(cfg.observation_space)
+        print("self.cfg.decimationnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:", self.cfg.decimation)
+        print("self.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dt: ", self.cfg.sim.dt)
         self.dt = self.cfg.sim.dt * self.cfg.decimation
+        # self.dt = self.cfg.sim.dt * 4
+        print("step_dt: ", self.step_dt)
         # self.max_episode_length_s = float(cfg.episode_length_s)
         # self.max_episode_length = math.ceil(self.max_episode_length_s / self.dt)
         self.legacy_max_episode_length_s = float(cfg.episode_length_s)
@@ -57,6 +61,7 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         #########################################################################
 
         self._build_joint_maps()
+        self._init_policy_compat_buffers()
         self._resample_commands(torch.arange(self.num_envs, device=self.device))
 
     def _setup_scene(self):
@@ -122,7 +127,142 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             dtype=torch.long,
             device=self.device,
         )        
-        ############################################                
+        print("[arm_joint_ids]", self.arm_joint_ids.detach().cpu().tolist())
+        print("[gripper_joint_ids]", self.gripper_joint_ids.detach().cpu().tolist())        
+        ############################################        
+        self.policy_all_joint_names = list(self.cfg.policy_joint_names)
+        if "jointGripper" in self.dof_names_to_idx and "jointGripper" not in self.policy_all_joint_names:
+            self.policy_all_joint_names.append("jointGripper")
+
+        self.policy_all_joint_ids = torch.tensor(
+            [self.dof_names_to_idx[n] for n in self.policy_all_joint_names],
+            dtype=torch.long,
+            device=self.device,
+        )#  
+
+    def _env_to_policy_all(self, vec: torch.Tensor) -> torch.Tensor:
+        """Convert a sim-order 19-DOF tensor to policy-all order.
+
+        Only use this for tensors whose last dim is num_dofs=19:
+        - dof_pos
+        - dof_vel
+        - default_dof_pos
+        - torques if needed
+
+        Do NOT use this for action tensors, because actions are 18-dim.
+        """
+        if vec.shape[-1] != self.num_dofs:
+            raise RuntimeError(
+                f"_env_to_policy_all expects last dim == num_dofs ({self.num_dofs}), "
+                f"but got shape {tuple(vec.shape)}. "
+                "Do not call _env_to_policy_all() on 18-dim action tensors."
+            )
+        return vec[:, self.policy_all_joint_ids]
+
+    def _env_to_policy_dog(self, vec: torch.Tensor) -> torch.Tensor:
+        return vec[:, self.policy_joint_ids[:12]]
+
+    def _policy_to_env_all(self, actions: torch.Tensor) -> torch.Tensor:
+        # Input is 18 policy actions. Return same 18 policy order here.
+        # Actual sim-order mapping happens via self.policy_joint_ids in _compute_torques.
+        return actions               
+
+    def _init_policy_compat_buffers(self):
+        # These fields mimic old ManipLoco policy-side buffers.
+        self.num_proprio = int(getattr(self.cfg, "num_proprio", 72))
+        self.num_priv = int(getattr(self.cfg, "num_priv", 18))
+        self.history_len = int(getattr(self.cfg, "history_len", 10))
+        self.num_gripper_joints = int(getattr(self.cfg, "num_gripper_joints", 1))
+
+        self.obs_buf = torch.zeros(self.num_envs, self.cfg.observation_space, device=self.device)
+        self.privileged_obs_buf = None
+
+        self.obs_history_buf = torch.zeros(
+            self.num_envs, self.history_len, self.num_proprio, device=self.device
+        )
+
+        # old action_history_buf stores env-order full policy actions.
+        # action_delay=3 is in metadata, but old auto mode uses -1 early in training/play.
+        self.action_delay = int(getattr(self.cfg, "action_delay", 3))
+        self.action_delay_mode = getattr(self.cfg, "action_delay_mode", "auto")
+        self.action_history_buf = torch.zeros(
+            self.num_envs, max(self.action_delay + 1, 4), self.num_actions, device=self.device
+        )
+
+        self.global_steps = 0
+        self.last_torques = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
+
+        # Old obs scales used by ManipLoco.compute_observations().
+        self.obs_scales = type("ObsScales", (), {})()
+        self.obs_scales.ang_vel = 0.25
+        self.obs_scales.dof_pos = 1.0
+        self.obs_scales.dof_vel = 0.05
+
+        # Old command scaling for [lin_x, lin_y, yaw].
+        self.commands_scale = torch.tensor([2.0, 2.0, 0.25], device=self.device)
+
+        # Domain-rand priv obs. In play, use neutral values.
+        self.mass_params_tensor = torch.zeros(self.num_envs, 4, device=self.device)
+        self.friction_coeffs_tensor = torch.ones(self.num_envs, 1, device=self.device)
+        self.motor_strength = torch.ones(self.num_envs, 12, device=self.device)
+        self.mass_params_tensor = torch.tensor(
+            [[
+                1.0417996644973755,
+                0.027897033840417862,
+                -0.004937552381306887,
+                0.0034558435436338186,
+                0.004164694342762232,
+            ]],
+            device=self.device,
+        ).repeat(self.num_envs, 1)
+
+        self.friction_coeffs_tensor = torch.tensor(
+            [[0.520315408706665]],
+            device=self.device,
+        ).repeat(self.num_envs, 1)
+
+        motor_strength_minus_1 = torch.tensor(
+            [[
+                -0.050519704818725586,
+                -0.002183079719543457,
+                0.015573859214782715,
+                0.08771336078643799,
+                0.04324972629547119,
+                0.051445960998535156,
+                -0.036211252212524414,
+                -0.06478011608123779,
+                0.02942824363708496,
+                0.09396469593048096,
+                0.07743573188781738,
+                -0.003672182559967041,
+            ]],
+            device=self.device,
+        )
+
+        self.motor_strength = 1.0 + motor_strength_minus_1        
+
+        # EE goal obs mode "command": checkpoint expects curr_ee_goal_cart.
+        # self.curr_ee_goal_cart = torch.tensor(
+        #     [0.2, 0.0, 0.2], device=self.device
+        # ).repeat(self.num_envs, 1)
+        self.curr_ee_goal_cart = torch.tensor(
+            [0.4619397819042206, 0.0, 0.19134172797203064],
+            device=self.device,
+        ).repeat(self.num_envs, 1)        
+        self.curr_ee_goal_sphere = torch.zeros(self.num_envs, 3, device=self.device)
+
+        # mixed_height_reference bit.
+        self.goal_height_follow_mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        # gait obs: gait_indices + 4 clock inputs.
+        self.gait_indices = torch.zeros(self.num_envs, device=self.device)
+        self.clock_inputs = torch.zeros(self.num_envs, 4, device=self.device)
+
+        # foot contacts. Until force sensors are ported, use contact sensor if available.
+        self.foot_contacts_from_sensor = torch.zeros(self.num_envs, 4, dtype=torch.bool, device=self.device)
+
+        # Noise disabled for play.
+        self.add_noise = False
 
     @property
     def root_states(self):
@@ -160,92 +300,514 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
     @property
     def contact_forces(self):
-        return self.contact_sensor.data.net_forces_w
+        return self.contact_sensor.data.net_forces_w   
+
+    def _debug_enabled(self) -> bool:
+        """Print full obs/action debug only for the first few env steps."""
+        return int(getattr(self, "global_steps", 0)) < 20
+
+    def _debug_print_tensor(self, name: str, x: torch.Tensor | None, max_full_elems: int = 300):
+        """Print tensor shape, stats, and full env0 value when small enough."""
+        if x is None:
+            print(f"[NEW DEBUG] {name}: None")
+            return
+
+        xd = x.detach()
+        shape = tuple(xd.shape)
+
+        if xd.numel() == 0:
+            print(f"[NEW DEBUG] {name}: shape={shape}, numel=0")
+            return
+
+        xf = xd.float().reshape(-1)
+        x_min = float(xf.min().cpu())
+        x_max = float(xf.max().cpu())
+        x_mean = float(xf.mean().cpu())
+
+        print(
+            f"[NEW DEBUG] {name}: "
+            f"shape={shape}, numel={xd.numel()}, "
+            f"min={x_min:+.6f}, max={x_max:+.6f}, mean={x_mean:+.6f}"
+        )
+
+        if xd.ndim >= 2:
+            env0 = xd[0].reshape(-1)
+        else:
+            env0 = xd.reshape(-1)
+
+        if env0.numel() <= max_full_elems:
+            print(f"[NEW DEBUG] {name}[0] = {env0.cpu().tolist()}")
+        else:
+            print(
+                f"[NEW DEBUG] {name}[0][:40] = {env0[:40].cpu().tolist()} "
+                f"... total_dim={env0.numel()}"
+            )
 
     def _pre_physics_step(self, actions: torch.Tensor):
+        debug_this_step = self._debug_enabled()
+
+        if debug_this_step:
+            print("\n" + "#" * 120)
+            print(f"[NEW ACTION DEBUG BEGIN] global_steps={int(self.global_steps)}")
+            print("#" * 120)
+            self._debug_print_tensor("actions_input_from_policy_raw_policy_order", actions)
+
+        if actions.shape[-1] != self.num_actions:
+            raise RuntimeError(f"Expected action dim {self.num_actions}, got {actions.shape[-1]}")
+
         clip = float(self.cfg.control.clip_actions)
-        self.actions = torch.clip(actions, -clip, clip).to(self.device)
-        self.actions[:, 12:] = 0.0
-        if self.actions.shape[-1] != self.num_actions:
-            raise RuntimeError(f"Expected action dim {self.num_actions}, got {self.actions.shape[-1]}")
-        self.torques = self._compute_torques(self.actions)
+
+        # Match old ManipLoco step(): actions[:, 12:] = 0.0
+        actions_before_arm_zero = actions.clone()
+        actions = actions.clone()
+        actions[:, 12:] = 0.0
+
+        actions_before_clip = actions.clone()
+        actions = torch.clip(actions, -clip, clip).to(self.device)
+
+        if debug_this_step:
+            print(f"[NEW DEBUG] cfg.control.clip_actions = {clip}")
+            self._debug_print_tensor("actions_before_arm_zero_policy_order", actions_before_arm_zero)
+            self._debug_print_tensor("actions_after_arm_zero_policy_order", actions_before_clip)
+            self._debug_print_tensor("actions_policy_order_after_clip", actions)
+            self._debug_print_tensor("actions_leg12_after_clip_policy_order", actions[:, :12])
+            self._debug_print_tensor("actions_arm6_after_clip_policy_order", actions[:, 12:])
+
+        # Old ManipLoco action delay buffer.
+        action_history_before = self.action_history_buf.clone() if debug_this_step else None
+
+        self.action_history_buf = torch.cat(
+            [
+                self.action_history_buf[:, 1:],
+                actions[:, None, :],
+            ],
+            dim=1,
+        )
+
+        if debug_this_step:
+            self._debug_print_tensor("action_history_buf_before_update", action_history_before)
+            self._debug_print_tensor("action_history_buf_after_update", self.action_history_buf)
+            self._debug_print_tensor("action_history_latest", self.action_history_buf[:, -1])
+            if self.action_history_buf.shape[1] >= 2:
+                self._debug_print_tensor("action_history_previous", self.action_history_buf[:, -2])
+
+        mode = getattr(self, "action_delay_mode", "auto")
+
+        if mode == "undelayed":
+            effective_actions = self.action_history_buf[:, -1]
+        elif mode == "delayed":
+            effective_actions = self.action_history_buf[:, -2]
+        else:
+            # Match old play behavior: early phase uses undelayed.
+            if self.global_steps < 10000 * 24:
+                effective_actions = self.action_history_buf[:, -1]
+            else:
+                effective_actions = self.action_history_buf[:, -2]
+
+        self.actions = effective_actions.clone()
+
+        # if debug_this_step:
+        #     print(f"[NEW DEBUG] action_delay_mode = {mode}")
+        #     self._debug_print_tensor("actions_final_after_delay_used_for_torque", self.actions)
+
+        # # self.torques = self._compute_torques(self.actions)
+
+        # if debug_this_step:
+        #     self._debug_print_tensor("torques_after_compute_torques_sim_order_19", self.torques)
+        #     if hasattr(self, "target_pos"):
+        #         self._debug_print_tensor("target_pos_after_compute_torques_sim_order_19", self.target_pos)
+        #     print("#" * 120)
+        #     print(f"[NEW ACTION DEBUG END] global_steps={int(self.global_steps)}")
+        #     print("#" * 120 + "\n")
 
     def _apply_action(self):
-        # 1. Hold arm/gripper by position targets, matching old set_dof_position_target_tensor().
-        arm_gripper_ids = torch.cat([self.arm_joint_ids, self.gripper_joint_ids])
-        if arm_gripper_ids.numel() > 0:
-            self.robot.set_joint_position_target(
-                self.default_dof_pos[:, arm_gripper_ids],
-                joint_ids=arm_gripper_ids,
-            )
-        # self.target_pos = self.default_dof_pos.clone()            
-        self.robot.set_joint_position_target(self.target_pos)            
+        # Full sim-order joint position target.
+        # Shape: [num_envs, num_dofs].
+        # It is generated in _compute_torques(actions).
+        debug_this_step = self._debug_enabled()
+
+        self.torques = self._compute_torques(self.actions)
+        # Optional effort target. For old ManipLoco-like behavior,
+        # arm/gripper torque is zeroed in _compute_torques().
+        self.robot.set_joint_effort_target(self.torques)
+                
+        if debug_this_step:
+            print("\n[NEW APPLY ACTION DEBUG]")
+            self._debug_print_tensor("target_pos_sent_to_isaaclab_sim_order_19", self.target_pos)
+            self._debug_print_tensor("torques_sent_to_isaaclab_sim_order_19", self.torques)
                     
-        self.robot.set_joint_effort_target(self.torques)          
+        # arm/gripper: only position target
+        pos_targets = self.dof_pos.clone()
+        pos_targets[:, self.arm_joint_ids] = self.target_pos[:, self.arm_joint_ids]
+        pos_targets[:, self.gripper_joint_ids] = self.target_pos[:, self.gripper_joint_ids]
+
+        self.robot.set_joint_position_target(pos_targets)
+
+        self.global_steps += 1    
 
     def _compute_torques(self, actions: torch.Tensor) -> torch.Tensor:
-        # torques = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
-        # scaled = actions * float(self.cfg.control.action_scale)
-        # joint_ids = self.policy_joint_ids
-        # if self.cfg.control.control_type == "P":
-        #     target = self.default_dof_pos[:, joint_ids] + scaled[:, : joint_ids.numel()]
-        #     torques[:, joint_ids] = (
-        #         self.p_gains[joint_ids] * (target - self.dof_pos[:, joint_ids])
-        #         - self.d_gains[joint_ids] * self.dof_vel[:, joint_ids]
-        #     )
-        # elif self.cfg.control.control_type == "T":
-        #     torques[:, joint_ids] = scaled[:, : joint_ids.numel()]
-        # else:
-        #     raise NotImplementedError("Only P and T control are implemented in this IsaacLab skeleton.")
-        # effort_limits = self.robot.data.soft_joint_vel_limits * 0.0 + 600.0
-        # return torch.clamp(torques, -effort_limits, effort_limits)
-        # scaled = actions * self.action_scale_tensor.unsqueeze(0)
+        """Compute sim-order effort targets from policy-order actions.
+
+        actions:
+            [num_envs, 18], policy joint order:
+            12 leg joints + 6 arm joints.
+
+        target_pos:
+            [num_envs, 19], IsaacLab sim joint order:
+            12 legs + 6 arm + jointGripper.
+        """
+        debug_this_step = self._debug_enabled()
+
+        if actions.shape[-1] != self.num_actions:
+            raise RuntimeError(f"Expected action dim {self.num_actions}, got {actions.shape[-1]}")
+
+        # Per-action scale from checkpoint metadata.
+        # Shape: [num_envs, 18]
         scaled = actions * self.action_scale_tensor.unsqueeze(0)
+
+        # Start from default pose in sim joint order.
+        # Shape: [num_envs, num_dofs]
         target_pos = self.default_dof_pos.clone()
+
+        # Write policy actions into corresponding sim joint ids.
         joint_ids = self.policy_joint_ids
+        target_pos[:, joint_ids] = (
+            self.default_dof_pos[:, joint_ids]
+            + scaled[:, : joint_ids.numel()]
+        )
 
-        # policy action controls 18 policy joints in sim joint order
-        target_pos[:, joint_ids] = self.default_dof_pos[:, joint_ids] + scaled[:, : joint_ids.numel()]
-
-        # keep this for IsaacLab position drive
+        # Keep for IsaacLab position drive.
         self.target_pos = target_pos
 
         if self.cfg.control.control_type == "P":
-            torques = (
+            torques_unclipped = (
                 self.p_gains.unsqueeze(0) * (target_pos - self.dof_pos)
                 - self.d_gains.unsqueeze(0) * self.dof_vel
             )
         elif self.cfg.control.control_type == "T":
-            torques = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
-            torques[:, joint_ids] = scaled[:, : joint_ids.numel()]
+            torques_unclipped = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
+            torques_unclipped[:, joint_ids] = scaled[:, : joint_ids.numel()]
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Unsupported control type: {self.cfg.control.control_type}")
 
-        # if you want old ManipLoco closer: arm torque zero, arm held by position target
-        if hasattr(self, "arm_joint_ids"):
-            torques[:, self.arm_joint_ids] = 0.0
-        if hasattr(self, "gripper_joint_ids"):
-            torques[:, self.gripper_joint_ids] = 0.0
+        torques_after_arm_zero = torques_unclipped.clone()
 
-        return torch.clamp(torques, -600.0, 600.0)
+        # Match old ManipLoco more closely:
+        # old ManipLoco zeroed the arm torque and used position target for arm/gripper.
+        if hasattr(self, "arm_joint_ids") and self.arm_joint_ids.numel() > 0:
+            torques_after_arm_zero[:, self.arm_joint_ids] = 0.0
+        if hasattr(self, "gripper_joint_ids") and self.gripper_joint_ids.numel() > 0:
+            torques_after_arm_zero[:, self.gripper_joint_ids] = 0.0
+
+        # Constant clamp for bring-up.
+        torques = torch.clamp(torques_after_arm_zero, -600.0, 600.0)
+
+        if debug_this_step:
+            print("\n[NEW TORQUE DEBUG]")
+            print(f"[NEW DEBUG] control_type = {self.cfg.control.control_type}")
+            self._debug_print_tensor("actions_input_to_compute_torques_policy_order_18", actions)
+            self._debug_print_tensor("action_scale_tensor_18", self.action_scale_tensor)
+            self._debug_print_tensor("scaled_actions_policy_order_18", scaled)
+
+            print("[NEW DEBUG] joint_ids policy->sim =", joint_ids.detach().cpu().tolist())
+            print("[NEW DEBUG] policy_joint_names =", self.cfg.policy_joint_names)
+
+            self._debug_print_tensor("default_dof_pos_sim_order_19", self.default_dof_pos)
+            self._debug_print_tensor("dof_pos_current_sim_order_19", self.dof_pos)
+            self._debug_print_tensor("dof_vel_current_sim_order_19", self.dof_vel)
+            self._debug_print_tensor("target_pos_sim_order_19", target_pos)
+            self._debug_print_tensor("target_offset_sim_order_19", target_pos - self.default_dof_pos)
+
+            self._debug_print_tensor("p_gains_sim_order_19", self.p_gains)
+            self._debug_print_tensor("d_gains_sim_order_19", self.d_gains)
+            self._debug_print_tensor("torques_unclipped_sim_order_19", torques_unclipped)
+            self._debug_print_tensor("torques_after_arm_gripper_zero_sim_order_19", torques_after_arm_zero)
+            self._debug_print_tensor("torques_final_clipped_sim_order_19", torques)
+
+        return torques
+
+    # def _compute_torques(self, actions: torch.Tensor) -> torch.Tensor:
+    #     scaled = actions * self.action_scale_tensor.unsqueeze(0)
+
+    #     target_pos = self.default_dof_pos.clone()
+    #     target_pos[:, self.policy_joint_ids] = (
+    #         self.default_dof_pos[:, self.policy_joint_ids]
+    #         + scaled[:, : self.policy_joint_ids.numel()]
+    #     )
+
+    #     self.target_pos = target_pos
+
+    #     if not hasattr(self, "_target_debug_counter"):
+    #         self._target_debug_counter = 0
+    #     self._target_debug_counter += 1
+
+    #     if self._target_debug_counter % 50 == 0:
+    #         offsets = (self.target_pos - self.default_dof_pos)[0, self.policy_joint_ids[:12]]
+    #         print("[target offset rad leg]", offsets.detach().cpu().tolist())
+
+    #     return torch.zeros(self.num_envs, self.num_dofs, device=self.device)    
+
+    def _get_body_orientation(self, return_yaw: bool = False):
+        r, p, y = euler_from_quat(self.base_quat)
+        body_angles = torch.stack([r, p, y], dim=-1)
+        return body_angles if return_yaw else body_angles[:, :-1]
+
+    def _update_policy_aux_obs(self):
+        # # Foot contact approximation from ContactSensor.
+        # # If contact force body order is uncertain, use robot body feet_indices as first approximation.
+        # try:
+        #     forces = self.contact_forces[:, self.feet_indices, :]
+        #     self.foot_contacts_from_sensor = torch.norm(forces, dim=-1) > 1.5
+        # except Exception:
+        #     self.foot_contacts_from_sensor = torch.zeros(
+        #         self.num_envs, 4, dtype=torch.bool, device=self.device
+        #     )
+
+        # # Gait clock. For first policy test, fixed frequency 2.0 Hz is enough.
+        # # dt is env step dt, not physics dt.
+        # freq = 2.0
+        # self.gait_indices = torch.remainder(self.gait_indices + self.step_dt * freq, 1.0)
+        
+        # 先强制 foot contact 和 old debug 一致
+        # self.foot_contacts_from_sensor[:] = torch.tensor(
+        #     [False, False, True, False],
+        #     device=self.device,
+        #     dtype=torch.bool,
+        # ).unsqueeze(0)
+        net_forces = self.contact_sensor.data.net_forces_w
+
+        if not hasattr(self, "_printed_contact_shape"):
+            self._printed_contact_shape = True
+            print("[contact net_forces_w shape]", tuple(net_forces.shape))
+            if hasattr(self.contact_sensor, "body_names"):
+                print("[contact sensor body_names]", self.contact_sensor.body_names)
+
+        # 如果 ContactSensor 只监控 4 个 foot body，直接用它本身
+        if net_forces.shape[1] == 4:
+            forces = net_forces
+
+        # 如果 ContactSensor 监控了所有 robot body，才可以用 robot feet_indices
+        elif net_forces.shape[1] == len(self.body_names):
+            forces = net_forces[:, self.feet_indices, :]
+
+        else:
+            print("[WARN] unexpected contact force shape:", tuple(net_forces.shape))
+            print("[WARN] robot feet_indices:", self.feet_indices.detach().cpu().tolist())
+            forces = torch.zeros(self.num_envs, 4, 3, device=self.device)
+
+        force_norm = torch.norm(forces, dim=-1)
+        self.foot_contacts_from_sensor = force_norm > 1.5
+
+        if int(self.global_steps) < 20:
+            print("[feet contact forces]", forces[0].detach().cpu().tolist())
+            print("[feet contact norm]", force_norm[0].detach().cpu().tolist())
+            print("[foot contacts]", self.foot_contacts_from_sensor[0].detach().cpu().tolist())              
+
+        # 先固定 gait / clock，不要推进
+        self.gait_indices[:] = 0.0
+        self.clock_inputs[:] = torch.tensor(
+            [-8.742277657347586e-08, 0.0, 0.0, -8.742277657347586e-08],
+            device=self.device,
+        ).unsqueeze(0)
+        
+        # phase = 2.0 * torch.pi * self.gait_indices
+        # self.clock_inputs = torch.stack(
+        #     [
+        #         torch.sin(phase),
+        #         torch.cos(phase),
+        #         torch.sin(phase + torch.pi),
+        #         torch.cos(phase + torch.pi),
+        #     ],
+        #     dim=-1,
+        # )
 
     def _get_observations(self):
-        obs = torch.cat((
-            self.base_lin_vel,
-            self.base_ang_vel,
-            self.projected_gravity,
-            self.commands[:, :3],
-            (self.dof_pos[:, self.policy_joint_ids] - self.default_dof_pos[:, self.policy_joint_ids]),
-            self.dof_vel[:, self.policy_joint_ids] * 0.05,
-            self.actions,
-        ), dim=-1)
-        if obs.shape[-1] < self.num_obs:
-            obs = torch.cat((obs, torch.zeros(self.num_envs, self.num_obs - obs.shape[-1], device=self.device)), dim=-1)
-        elif obs.shape[-1] > self.num_obs:
-            obs = obs[:, :self.num_obs]
-        obs = torch.clip(obs, -self.cfg.control.clip_observations, self.cfg.control.clip_observations)
-        self.last_actions[:] = self.actions
-        return {"policy": obs}
+        self._update_policy_aux_obs()
+
+        ee_goal_local_cart = self.curr_ee_goal_cart
+
+        obs_body_orientation = self._get_body_orientation()
+        # dim 2
+
+        obs_base_ang_vel = self.base_ang_vel * self.obs_scales.ang_vel
+        # dim 3
+
+        obs_dof_pos = self._env_to_policy_all(
+            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos
+        )[:, :-self.num_gripper_joints]
+        # dim 18
+
+        obs_dof_vel = self._env_to_policy_all(
+            self.dof_vel * self.obs_scales.dof_vel
+        )[:, :-self.num_gripper_joints]
+        # dim 18
+
+        obs_last_leg_actions = self.action_history_buf[:, -1, :12]
+        # dim 12
+
+        obs_foot_contacts = self.foot_contacts_from_sensor
+        # dim 4
+
+        obs_commands = self.commands[:, :3] * self.commands_scale
+        # dim 3
+
+        obs_ee_goal_local_cart = ee_goal_local_cart
+        # dim 3
+
+        obs_ee_goal_orientation_dummy = 0.0 * self.curr_ee_goal_sphere
+        # dim 3
+
+        obs_terms_named = [
+            ("body_orientation_2", obs_body_orientation),
+            ("base_ang_vel_scaled_3", obs_base_ang_vel),
+            ("dof_pos_minus_default_scaled_policy_order_18", obs_dof_pos),
+            ("dof_vel_scaled_policy_order_18", obs_dof_vel),
+            ("last_leg_actions_policy_order_12", obs_last_leg_actions),
+            ("foot_contacts_4", obs_foot_contacts),
+            ("commands_scaled_3", obs_commands),
+            ("ee_goal_local_cart_3", obs_ee_goal_local_cart),
+            ("ee_goal_orientation_dummy_3", obs_ee_goal_orientation_dummy),
+        ]
+
+        if getattr(self.cfg, "mixed_height_reference", True):
+            obs_goal_height_mask = self.goal_height_follow_mask.float().unsqueeze(1)
+            obs_terms_named.append(("goal_height_follow_mask_1", obs_goal_height_mask))
+
+        obs_buf = torch.cat([x for _, x in obs_terms_named], dim=-1)
+
+        if getattr(self.cfg, "observe_gait_commands", True):
+            obs_gait_indices = self.gait_indices.unsqueeze(1)
+            obs_clock_inputs = self.clock_inputs
+
+            obs_terms_named.append(("gait_indices_1", obs_gait_indices))
+            obs_terms_named.append(("clock_inputs_4", obs_clock_inputs))
+
+            obs_buf = torch.cat(
+                [
+                    obs_buf,
+                    obs_gait_indices,
+                    obs_clock_inputs,
+                ],
+                dim=-1,
+            )
+
+        # -----------------------------
+        # Full obs debug, first 5 steps
+        # -----------------------------
+        if self._debug_enabled():
+            print("\n" + "=" * 120)
+            print(f"[NEW OBS DEBUG] global_steps={int(self.global_steps)}")
+            print("=" * 120)
+
+            obs_start = 0
+            for name, term in obs_terms_named:
+                dim = term.shape[-1]
+                obs_end = obs_start + dim
+
+                print(f"\n[NEW OBS TERM] {name}: obs_slice=[{obs_start}:{obs_end}], dim={dim}")
+                self._debug_print_tensor(name, term)
+
+                obs_start = obs_end
+
+            print(f"\n[NEW OBS CAT] proprio obs_buf dim = {obs_buf.shape[-1]}")
+            self._debug_print_tensor("obs_buf_proprio_72", obs_buf)
+
+            self._debug_print_tensor("raw_root_states", self.root_states)
+            self._debug_print_tensor("root_pos_w", self.robot.data.root_pos_w)
+            self._debug_print_tensor("root_quat_w", self.robot.data.root_quat_w)
+            self._debug_print_tensor("root_lin_vel_w", self.robot.data.root_lin_vel_w)
+            self._debug_print_tensor("root_ang_vel_w", self.robot.data.root_ang_vel_w)
+            self._debug_print_tensor("base_lin_vel_b", self.base_lin_vel)
+            self._debug_print_tensor("base_ang_vel_b", self.base_ang_vel)
+            self._debug_print_tensor("projected_gravity_b", self.projected_gravity)
+            self._debug_print_tensor("dof_pos_sim_order_19", self.dof_pos)
+            self._debug_print_tensor("dof_vel_sim_order_19", self.dof_vel)
+            self._debug_print_tensor("default_dof_pos_sim_order_19", self.default_dof_pos)
+
+            print("[NEW DEBUG] dof_names sim order =", self.dof_names)
+            print("[NEW DEBUG] policy_joint_names =", self.cfg.policy_joint_names)
+            print("[NEW DEBUG] policy_joint_ids =", self.policy_joint_ids.detach().cpu().tolist())
+            print("[NEW DEBUG] policy_all_joint_names =", self.policy_all_joint_names)
+            print("[NEW DEBUG] policy_all_joint_ids =", self.policy_all_joint_ids.detach().cpu().tolist())
+
+        # Sanity: checkpoint expects proprio dim 72.
+        if obs_buf.shape[-1] != self.num_proprio:
+            raise RuntimeError(
+                f"Expected proprio dim {self.num_proprio}, got {obs_buf.shape[-1]}. "
+                f"Check obs layout."
+            )
+
+        priv_buf = torch.cat(
+            [
+                self.mass_params_tensor,          # 4
+                self.friction_coeffs_tensor,      # 1
+                self.motor_strength[:, :12] - 1,  # 12
+                # torch.zeros(self.num_envs, 1, device=self.device),  # pad to 18
+            ],
+            dim=-1,
+        )
+
+        if priv_buf.shape[-1] != self.num_priv:
+            raise RuntimeError(f"Expected priv dim {self.num_priv}, got {priv_buf.shape[-1]}")
+
+        if self._debug_enabled():
+            print("\n[NEW PRIV DEBUG]")
+            self._debug_print_tensor("mass_params_tensor_4", self.mass_params_tensor)
+            self._debug_print_tensor("friction_coeffs_tensor_1", self.friction_coeffs_tensor)
+            self._debug_print_tensor("motor_strength_minus_1_leg_12", self.motor_strength[:, :12] - 1)
+            self._debug_print_tensor("priv_pad_1", torch.zeros(self.num_envs, 1, device=self.device))
+            self._debug_print_tensor("priv_buf_18", priv_buf)
+            self._debug_print_tensor("obs_history_buf_before_update", self.obs_history_buf)
+            self._debug_print_tensor(
+                "obs_history_flat_before_update",
+                self.obs_history_buf.reshape(self.num_envs, -1),
+            )
+
+        self.obs_buf = torch.cat(
+            [
+                obs_buf,
+                priv_buf,
+                self.obs_history_buf.reshape(self.num_envs, -1),
+            ],
+            dim=-1,
+        )
+
+        if self.obs_buf.shape[-1] != self.num_obs:
+            raise RuntimeError(
+                f"Expected obs dim {self.num_obs}, got {self.obs_buf.shape[-1]}"
+            )
+
+        if self._debug_enabled():
+            print("\n[NEW FINAL OBS BEFORE HISTORY UPDATE]")
+            self._debug_print_tensor("self.obs_buf_before_clip_input_to_policy", self.obs_buf)
+            print(f"[NEW FINAL OBS DIM] self.obs_buf.shape = {tuple(self.obs_buf.shape)}")
+
+        # Update history after constructing obs, matching old code ordering.
+        self.obs_history_buf = torch.where(
+            (self.episode_length_buf <= 1)[:, None, None],
+            torch.stack([obs_buf] * self.history_len, dim=1),
+            torch.cat(
+                [
+                    self.obs_history_buf[:, 1:],
+                    obs_buf.unsqueeze(1),
+                ],
+                dim=1,
+            ),
+        )
+
+        self.obs_buf = torch.clip(
+            self.obs_buf,
+            -self.cfg.control.clip_observations,
+            self.cfg.control.clip_observations,
+        )
+
+        if self._debug_enabled():
+            print("\n[NEW FINAL OBS AFTER CLIP]")
+            print(f"[NEW DEBUG] clip_observations = {self.cfg.control.clip_observations}")
+            self._debug_print_tensor("self.obs_buf_after_clip_return_policy", self.obs_buf)
+            print("=" * 120 + "\n")
+
+        return {"policy": self.obs_buf}
 
     def _get_rewards(self):
         lin_err = torch.sum((self.commands[:, :2] - self.base_lin_vel[:, :2]) ** 2, dim=-1)
@@ -290,7 +852,8 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
     # legacy API conveniences used by old scripts
     def get_observations(self):
-        return self._get_observations()["policy"]
+        # return self._get_observations()["policy"]
+        return self._get_observations()
 
     def get_privileged_observations(self):
         return None

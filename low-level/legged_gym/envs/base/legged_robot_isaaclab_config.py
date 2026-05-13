@@ -56,7 +56,7 @@ class LeggedRobotIsaacLabCfg(DirectRLEnvCfg):
             max_velocity_iteration_count=0,
         ),
     )
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=3.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=True)
 
     # terrain: use plane first. Rebuild rough terrain after policy I/O is verified.
     terrain: TerrainImporterCfg = TerrainImporterCfg(
@@ -108,28 +108,28 @@ class LeggedRobotIsaacLabCfg(DirectRLEnvCfg):
         actuators={
             # Legs: old pipeline uses manual torque PD.
             # Keep stiffness/damping 0 to avoid double PD.
-            # "legs": ImplicitActuatorCfg(
-            #     joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
-            #     effort_limit_sim=600.0,
-            #     velocity_limit_sim=100.0,
-            #     stiffness=0,
-            #     damping=0,
-            # ),            
             "legs": ImplicitActuatorCfg(
                 joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
                 effort_limit_sim=600.0,
                 velocity_limit_sim=100.0,
-                stiffness={
-                    ".*hip_joint": 500.0,
-                    ".*thigh_joint": 500.0,
-                    ".*calf_joint": 500.0,
-                },
-                damping={
-                    ".*hip_joint": 20.0,
-                    ".*thigh_joint": 20.0,
-                    ".*calf_joint": 20.0,
-                },
-            ),
+                stiffness=0,
+                damping=0,
+            ),            
+            # "legs": ImplicitActuatorCfg(
+            #     joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
+            #     effort_limit_sim=600.0,
+            #     velocity_limit_sim=100.0,
+            #     stiffness={
+            #         ".*hip_joint": 500.0,
+            #         ".*thigh_joint": 500.0,
+            #         ".*calf_joint": 500.0,
+            #     },
+            #     damping={
+            #         ".*hip_joint": 20.0,
+            #         ".*thigh_joint": 20.0,
+            #         ".*calf_joint": 20.0,
+            #     },
+            # ),
 
             # Z1 arm + gripper: old ManipLoco used position target drive.
             # Give IsaacLab drive stiffness/damping here.
@@ -161,7 +161,8 @@ class LeggedRobotIsaacLabCfg(DirectRLEnvCfg):
         }
     )
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/.*",
+        # prim_path="/World/envs/env_.*/Robot/.*",
+        prim_path="/World/envs/env_.*/Robot/.*_foot",
         history_length=3,
         track_air_time=True,
     )

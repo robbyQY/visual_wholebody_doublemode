@@ -50,10 +50,12 @@ while simulation_app.is_running():
     with torch.inference_mode():
         actions = torch.zeros(env.num_envs, cfg.action_space, device=env.device)
         obs, rew, terminated, truncated, info = env.step(actions)
-        obs = env.get_observations()
+        obs_dict = env.get_observations()
+        obs = obs_dict["policy"]
         print(obs.shape)
         # print(env.robot.data.root_pos_w[0])
         # print(env.robot.data.root_lin_vel_w[0])
+        # print(obs[0, :20])
 
 env.close()
 simulation_app.close()

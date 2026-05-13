@@ -5,7 +5,16 @@ from legged_gym.envs.base.legged_robot_isaaclab_config import LeggedRobotIsaacLa
 @configclass
 class B2Z1IsaacLabCfg(LeggedRobotIsaacLabCfg):
     action_space = 18
-    observation_space = 235
+    observation_space = 810
+    num_proprio = 72
+    num_priv = 18
+    history_len = 10
+    observe_gait_commands = True
+    mixed_height_reference = True
+    action_delay = 3
+    action_delay_mode = "undelayed"
+    num_gripper_joints = 1
+
     episode_length_s = 20.0
     decimation = 4
     base_body_name = "base_link"
@@ -42,50 +51,50 @@ class B2Z1IsaacLabCfg(LeggedRobotIsaacLabCfg):
         ],
         clip_actions=100.0,
         clip_observations=100.0,
-        # stiffness={
-        #     "FL_hip_joint": 100, "FL_thigh_joint": 100, "FL_calf_joint": 100,
-        #     "FR_hip_joint": 100, "FR_thigh_joint": 100, "FR_calf_joint": 100,
-        #     "RL_hip_joint": 100, "RL_thigh_joint": 100, "RL_calf_joint": 100,
-        #     "RR_hip_joint": 100, "RR_thigh_joint": 100, "RR_calf_joint": 100,
-        #     "joint1": 5, "joint2": 5, "joint3": 5, "joint4": 5, "joint5": 5, "joint6": 5,
-        #     "jointGripper": 5,
-        # },
-        # damping={
-        #     "FL_hip_joint": 3.0, "FL_thigh_joint": 3.0, "FL_calf_joint": 3.0,
-        #     "FR_hip_joint": 3.0, "FR_thigh_joint": 3.0, "FR_calf_joint": 3.0,
-        #     "RL_hip_joint": 3.0, "RL_thigh_joint": 3.0, "RL_calf_joint": 3.0,
-        #     "RR_hip_joint": 3.0, "RR_thigh_joint": 3.0, "RR_calf_joint": 3.0,
-        #     "joint1": 0.5, "joint2": 0.5, "joint3": 0.5, "joint4": 0.5, "joint5": 0.5, "joint6": 0.5,
-        #     "jointGripper": 0.5,
-        # },
         stiffness={
-            "FL_hip_joint": 180, "FL_thigh_joint": 180, "FL_calf_joint": 180,
-            "FR_hip_joint": 180, "FR_thigh_joint": 180, "FR_calf_joint": 180,
-            "RL_hip_joint": 180, "RL_thigh_joint": 180, "RL_calf_joint": 180,
-            "RR_hip_joint": 180, "RR_thigh_joint": 180, "RR_calf_joint": 180,
-
-            "joint1": 20,
-            "joint2": 80,
-            "joint3": 80,
-            "joint4": 30,
-            "joint5": 20,
-            "joint6": 20,
-            "jointGripper": 10,
+            "FL_hip_joint": 100, "FL_thigh_joint": 100, "FL_calf_joint": 100,
+            "FR_hip_joint": 100, "FR_thigh_joint": 100, "FR_calf_joint": 100,
+            "RL_hip_joint": 100, "RL_thigh_joint": 100, "RL_calf_joint": 100,
+            "RR_hip_joint": 100, "RR_thigh_joint": 100, "RR_calf_joint": 100,
+            "joint1": 5, "joint2": 5, "joint3": 5, "joint4": 5, "joint5": 5, "joint6": 5,
+            "jointGripper": 5,
         },
         damping={
-            "FL_hip_joint": 6.0, "FL_thigh_joint": 6.0, "FL_calf_joint": 6.0,
-            "FR_hip_joint": 6.0, "FR_thigh_joint": 6.0, "FR_calf_joint": 6.0,
-            "RL_hip_joint": 6.0, "RL_thigh_joint": 6.0, "RL_calf_joint": 6.0,
-            "RR_hip_joint": 6.0, "RR_thigh_joint": 6.0, "RR_calf_joint": 6.0,
+            "FL_hip_joint": 3.0, "FL_thigh_joint": 3.0, "FL_calf_joint": 3.0,
+            "FR_hip_joint": 3.0, "FR_thigh_joint": 3.0, "FR_calf_joint": 3.0,
+            "RL_hip_joint": 3.0, "RL_thigh_joint": 3.0, "RL_calf_joint": 3.0,
+            "RR_hip_joint": 3.0, "RR_thigh_joint": 3.0, "RR_calf_joint": 3.0,
+            "joint1": 0.5, "joint2": 0.5, "joint3": 0.5, "joint4": 0.5, "joint5": 0.5, "joint6": 0.5,
+            "jointGripper": 0.5,
+        },
+        # stiffness={
+        #     "FL_hip_joint": 180, "FL_thigh_joint": 180, "FL_calf_joint": 180,
+        #     "FR_hip_joint": 180, "FR_thigh_joint": 180, "FR_calf_joint": 180,
+        #     "RL_hip_joint": 180, "RL_thigh_joint": 180, "RL_calf_joint": 180,
+        #     "RR_hip_joint": 180, "RR_thigh_joint": 180, "RR_calf_joint": 180,
 
-            "joint1": 2.0,
-            "joint2": 4.0,
-            "joint3": 4.0,
-            "joint4": 2.0,
-            "joint5": 1.0,
-            "joint6": 1.0,
-            "jointGripper": 1.0,
-        },        
+        #     "joint1": 20,
+        #     "joint2": 80,
+        #     "joint3": 80,
+        #     "joint4": 30,
+        #     "joint5": 20,
+        #     "joint6": 20,
+        #     "jointGripper": 10,
+        # },
+        # damping={
+        #     "FL_hip_joint": 6.0, "FL_thigh_joint": 6.0, "FL_calf_joint": 6.0,
+        #     "FR_hip_joint": 6.0, "FR_thigh_joint": 6.0, "FR_calf_joint": 6.0,
+        #     "RL_hip_joint": 6.0, "RL_thigh_joint": 6.0, "RL_calf_joint": 6.0,
+        #     "RR_hip_joint": 6.0, "RR_thigh_joint": 6.0, "RR_calf_joint": 6.0,
+
+        #     "joint1": 2.0,
+        #     "joint2": 4.0,
+        #     "joint3": 4.0,
+        #     "joint4": 2.0,
+        #     "joint5": 1.0,
+        #     "joint6": 1.0,
+        #     "jointGripper": 1.0,
+        # },        
     )
     
     def __post_init__(self):
