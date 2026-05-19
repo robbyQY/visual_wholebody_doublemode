@@ -9,7 +9,8 @@ import isaaclab.sim as sim_utils
 
 from legged_gym.utils.isaaclab_math import quat_rotate_inverse, quat_apply, quat_from_euler_xyz, euler_from_quat, torch_rand_float, wrap_to_pi
 from .legged_robot_isaaclab_config import LeggedRobotIsaacLabCfg
-
+import numpy as np
+from rsl_rl.utils import resolve_schedule_value
 
 class LeggedRobotIsaacLab(DirectRLEnv):
     """Core IsaacLab port of the uploaded legged_gym BaseTask/LeggedRobot simulator layer.
@@ -49,6 +50,42 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         self.reset_buf = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.time_out_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.extras = {}
+
+        self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                  requires_grad=False, )
+        self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                        requires_grad=False)
+        self.gait_frequencies = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                            requires_grad=False)
+        self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                        requires_grad=False)
+        self.doubletime_clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                   requires_grad=False)
+        self.halftime_clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                 requires_grad=False)        
+
+
+        schedule_counter = float(getattr(self.cfg.commands, "curriculum_playback_counter", 0.0) or 0.0)
+        schedule_total_iterations = getattr(self.cfg.commands, "curriculum_playback_total_iterations", None)
+        lin_vel_x_min = resolve_schedule_value(
+            self.cfg.commands.lin_vel_x_min_schedule,
+            counter=schedule_counter,
+            default_end_iter=schedule_total_iterations,
+        )
+        lin_vel_x_max = resolve_schedule_value(
+            self.cfg.commands.lin_vel_x_max_schedule,
+            counter=schedule_counter,
+            default_end_iter=schedule_total_iterations,
+        )
+        ang_vel_yaw_max = resolve_schedule_value(
+            self.cfg.commands.ang_vel_yaw_schedule,
+            counter=schedule_counter,
+            default_end_iter=schedule_total_iterations,
+        )
+        self.command_ranges = {
+            "lin_vel_x": [lin_vel_x_min, lin_vel_x_max],
+            "ang_vel_yaw": [-ang_vel_yaw_max, ang_vel_yaw_max],
+        }
 
         ######################################################################
         scale = self.cfg.control.action_scale
@@ -194,12 +231,13 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
         # Old obs scales used by ManipLoco.compute_observations().
         self.obs_scales = type("ObsScales", (), {})()
-        self.obs_scales.ang_vel = 0.25
+        self.obs_scales.ang_vel = 1.0
         self.obs_scales.dof_pos = 1.0
         self.obs_scales.dof_vel = 0.05
 
         # Old command scaling for [lin_x, lin_y, yaw].
-        self.commands_scale = torch.tensor([2.0, 2.0, 0.25], device=self.device)
+        # self.commands_scale = torch.tensor([2.0, 2.0, 0.25], device=self.device)
+        self.commands_scale = torch.tensor([1.0, 1.0, 1.0], device=self.device)
 
         # Domain-rand priv obs. In play, use neutral values.
         self.mass_params_tensor = torch.zeros(self.num_envs, 4, device=self.device)
@@ -344,6 +382,7 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             )
 
     def _pre_physics_step(self, actions: torch.Tensor):
+        self.global_steps += 1    
         debug_this_step = self._debug_enabled()
 
         if debug_this_step:
@@ -442,8 +481,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         pos_targets[:, self.gripper_joint_ids] = self.target_pos[:, self.gripper_joint_ids]
 
         self.robot.set_joint_position_target(pos_targets)
-
-        self.global_steps += 1    
 
     def _compute_torques(self, actions: torch.Tensor) -> torch.Tensor:
         """Compute sim-order effort targets from policy-order actions.
@@ -603,12 +640,13 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             print("[feet contact norm]", force_norm[0].detach().cpu().tolist())
             print("[foot contacts]", self.foot_contacts_from_sensor[0].detach().cpu().tolist())              
 
-        # 先固定 gait / clock，不要推进
-        self.gait_indices[:] = 0.0
-        self.clock_inputs[:] = torch.tensor(
-            [-8.742277657347586e-08, 0.0, 0.0, -8.742277657347586e-08],
-            device=self.device,
-        ).unsqueeze(0)
+        # # 先固定 gait / clock，不要推进
+        # self.gait_indices[:] = 0.0
+        # self.clock_inputs[:] = torch.tensor(
+        #     [-8.742277657347586e-08, 0.0, 0.0, -8.742277657347586e-08],
+        #     device=self.device,
+        # ).unsqueeze(0)
+        self._step_contact_targets()
         
         # phase = 2.0 * torch.pi * self.gait_indices
         # self.clock_inputs = torch.stack(
@@ -809,6 +847,101 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
         return {"policy": self.obs_buf}
 
+    def _step_contact_targets(self):
+        if self.cfg.env.observe_gait_commands:
+            frequencies, walking_mask = self._get_gait_frequencies()
+            phases = 0.5
+            offsets = 0
+            bounds = 0
+            durations = 0.5
+            self.gait_indices = torch.remainder(self.gait_indices + self.dt * frequencies, 1.0)
+            self.gait_indices[~walking_mask] = 0
+
+            canonical_foot_indices = {
+                "FL_foot": self.gait_indices + phases + offsets + bounds,
+                "FR_foot": self.gait_indices + offsets,
+                "RL_foot": self.gait_indices + bounds,
+                "RR_foot": self.gait_indices + phases,
+            }
+            policy_foot_names = list(self.cfg.asset.policy_foot_names)
+            raw_foot_indices = {
+                foot_name: torch.remainder(canonical_foot_indices[foot_name], 1.0)
+                for foot_name in policy_foot_names
+            }
+
+            self.foot_indices = torch.cat(
+                [raw_foot_indices[foot_name].unsqueeze(1) for foot_name in policy_foot_names],
+                dim=1,
+            )
+
+            shaped_foot_indices = {}
+            for foot_name, base_indices in canonical_foot_indices.items():
+                idxs = base_indices.clone()
+                stance_idxs = torch.remainder(idxs, 1) < durations
+                swing_idxs = torch.remainder(idxs, 1) > durations
+
+                idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (0.5 / durations)
+                idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - durations) * (
+                            0.5 / (1 - durations))
+                shaped_foot_indices[foot_name] = idxs
+
+            for i, foot_name in enumerate(policy_foot_names):
+                idxs = shaped_foot_indices[foot_name]
+                self.clock_inputs[:, i] = torch.sin(2 * np.pi * idxs)
+                self.doubletime_clock_inputs[:, i] = torch.sin(4 * np.pi * idxs)
+                self.halftime_clock_inputs[:, i] = torch.sin(np.pi * idxs)
+
+            # def _compute_smoothing_multiplier(idxs):
+            #     phase = torch.remainder(idxs, 1.0)
+            #     return (
+            #         smoothing_cdf_start(phase) * (1 - smoothing_cdf_start(phase - 0.5))
+            #         + smoothing_cdf_start(phase - 1) * (1 - smoothing_cdf_start(phase - 1.5))
+            #     )
+
+            # # von mises distribution
+            # kappa = self.cfg.rewards.kappa_gait_probs
+            # smoothing_cdf_start = torch.distributions.normal.Normal(0,
+            #                                                         kappa).cdf  # (x) + torch.distributions.normal.Normal(1, kappa).cdf(x)) / 2
+
+            # smoothing_multipliers = {
+            #     foot_name: _compute_smoothing_multiplier(shaped_foot_indices[foot_name])
+            #     for foot_name in policy_foot_names
+            # }
+
+            # for i, foot_name in enumerate(policy_foot_names):
+            #     self.desired_contact_states[:, i] = smoothing_multipliers[foot_name]
+
+    def _get_gait_frequencies(self):
+        min_frequency = float(self.cfg.env.gait_frequency_min)
+        max_frequency = float(self.cfg.env.gait_frequency_max)
+        if max_frequency < min_frequency:
+            min_frequency, max_frequency = max_frequency, min_frequency
+
+        lin_vel_ref = max(float(self.cfg.env.gait_frequency_lin_vel_ref), 1e-6)
+        ang_vel_ref = max(float(self.cfg.env.gait_frequency_ang_vel_ref), 1e-6)
+        ang_vel_weight = max(float(self.cfg.env.gait_frequency_ang_vel_weight), 0.0)
+
+        lin_cmd_level = torch.norm(self.commands[:, :2], dim=1) / lin_vel_ref
+        yaw_cmd_level = torch.abs(self.commands[:, 2]) / ang_vel_ref
+        gait_level = torch.clamp(lin_cmd_level + ang_vel_weight * yaw_cmd_level, 0.0, 1.0)
+
+        frequencies = min_frequency + (max_frequency - min_frequency) * gait_level
+        walking_mask = self._get_walking_cmd_mask()
+        frequencies = torch.where(walking_mask, frequencies, torch.zeros_like(frequencies))
+        self.gait_frequencies[:] = frequencies
+        return frequencies, walking_mask
+    
+    def _get_walking_cmd_mask(self, env_ids=None, return_all=False):
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        walking_mask0 = torch.abs(self.commands[env_ids, 0]) > self.cfg.commands.lin_vel_x_clip
+        walking_mask1 = torch.abs(self.commands[env_ids, 1]) > self.cfg.commands.lin_vel_x_clip
+        walking_mask2 = torch.abs(self.commands[env_ids, 2]) > self.cfg.commands.ang_vel_yaw_clip
+        walking_mask = walking_mask0 | walking_mask1 | walking_mask2
+        if return_all:
+            return walking_mask0, walking_mask1, walking_mask2, walking_mask
+        return walking_mask
+        
     def _get_rewards(self):
         lin_err = torch.sum((self.commands[:, :2] - self.base_lin_vel[:, :2]) ** 2, dim=-1)
         yaw_err = (self.commands[:, 2] - self.base_ang_vel[:, 2]) ** 2
@@ -832,6 +965,7 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         joint_vel = torch.zeros_like(joint_pos)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
         self.robot.set_joint_position_target(joint_pos, env_ids=env_ids)
+        print("hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii")
 
         root_state = self.robot.data.default_root_state[env_ids].clone()
         root_state[:, :3] += self.scene.env_origins[env_ids]
@@ -839,16 +973,29 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         self.robot.write_root_pose_to_sim(root_state[:, :7], env_ids=env_ids)
         self.robot.write_root_velocity_to_sim(root_state[:, 7:], env_ids=env_ids)
         self._resample_commands(env_ids)
+        self.commands[:] = 0.0
+        self.commands[:, 0] = 1.0
+        self.commands[:, 2] = 0.0
 
     def _resample_commands(self, env_ids):
         if env_ids.numel() == 0:
             return
-        c = self.cfg.commands
-        self.commands[env_ids, 0] = torch_rand_float(c.lin_vel_x[0], c.lin_vel_x[1], (len(env_ids), 1), self.device).squeeze(-1)
-        if self.commands.shape[1] > 1:
-            self.commands[env_ids, 1] = torch_rand_float(c.lin_vel_y[0], c.lin_vel_y[1], (len(env_ids), 1), self.device).squeeze(-1)
-        if self.commands.shape[1] > 2:
-            self.commands[env_ids, 2] = torch_rand_float(c.ang_vel_yaw[0], c.ang_vel_yaw[1], (len(env_ids), 1), self.device).squeeze(-1)
+
+        self.commands[env_ids, 0] = torch_rand_float(
+            self.command_ranges["lin_vel_x"][0],
+            self.command_ranges["lin_vel_x"][1],
+            (len(env_ids), 1),
+            device=self.device,
+        ).squeeze(1)
+        self.commands[env_ids, 1] = 0
+        self.commands[env_ids, 2] = torch_rand_float(
+            self.command_ranges["ang_vel_yaw"][0],
+            self.command_ranges["ang_vel_yaw"][1],
+            (len(env_ids), 1),
+            device=self.device,
+        ).squeeze(1)
+        # set small commands to zero
+        self.commands[env_ids, :] *= (torch.logical_or(torch.abs(self.commands[env_ids, 0]) > self.cfg.commands.lin_vel_x_clip, torch.abs(self.commands[env_ids, 2]) > self.cfg.commands.ang_vel_yaw_clip)).unsqueeze(1)
 
     # legacy API conveniences used by old scripts
     def get_observations(self):

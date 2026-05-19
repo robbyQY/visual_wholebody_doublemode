@@ -43,6 +43,9 @@ dist/
 # Maven
 target/
 
+*.txt
+b2z1/*
+
 # JetBrains IDE
 .idea/
 

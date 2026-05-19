@@ -104,7 +104,7 @@ class LeggedRobotIsaacLabCfg(DirectRLEnvCfg):
                 solver_velocity_iteration_count=0,
             ),
         ),
-        init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 0.5), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}),
+        init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 0.55), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}),
         actuators={
             # Legs: old pipeline uses manual torque PD.
             # Keep stiffness/damping 0 to avoid double PD.

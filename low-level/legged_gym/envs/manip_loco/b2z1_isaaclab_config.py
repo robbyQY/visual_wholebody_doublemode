@@ -96,7 +96,73 @@ class B2Z1IsaacLabCfg(LeggedRobotIsaacLabCfg):
         #     "jointGripper": 1.0,
         # },        
     )
-    
+
+    class env:
+        num_envs = 6144
+        num_actions = 12 + 6 #CAUTION
+        num_torques = 12 + 6
+        action_delay = 3  # -1 for no delay
+        action_delay_mode = "auto"  # auto: keep training curriculum, undelayed: latest action, delayed: one-step delayed action
+        ee_goal_obs_mode = "command"  # command: use sampled EE command directly, arm_base_target: use target relative to arm base
+        num_gripper_joints = 1
+        num_proprio = 2 + 3 + 18 + 18 + 12 + 4 + 3 + 3 + 3
+        num_priv = 5 + 1 + 12
+        history_len = 10
+        num_observations = num_proprio * (history_len + 1) + num_priv
+        num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
+        send_timeouts = True # send time out information to the algorithm
+        episode_length_s = 30 # episode length in seconds
+        reorder_dofs = True
+        teleop_mode = False # Overriden in teleop.py. When true, commands come from keyboard
+        teleop_input_regularization = False # If true, preprocess teleop inputs before feeding the policy/control stack
+        teleop_zero_lin_vel_x_clip = 0.2
+        teleop_zero_ang_vel_yaw_clip = 0.5
+        teleop_lin_vel_x_limit = 0.8
+        teleop_ang_vel_yaw_limit = 1.0
+        teleop_ee_goal_x_limit = [-0.5, 1.0]
+        teleop_ee_goal_y_limit = [-0.7, 0.7]
+        teleop_ee_goal_z_limit = [-0.6, 0.6]
+        teleop_restore_arm_gripper_state_on_reset = False
+        teleop_key_repeat_delay_s = 0.35
+        teleop_key_repeat_rate_hz = 6.0
+        record_video = False
+        stand_by = False
+        observe_gait_commands = True
+        gait_frequency_min = 2.0
+        gait_frequency_max = 2.0
+        gait_frequency_lin_vel_ref = 1.2
+        gait_frequency_ang_vel_ref = 2.0
+        gait_frequency_ang_vel_weight = 1.0
+
+    class commands:
+        curriculum = True
+        num_commands = 3
+        resampling_time = 3.0 # time before command are changed[s]
+
+        # Command-range curricula
+        lin_vel_x_min_schedule = [0.0, -0.8, 5000, 5000]
+        lin_vel_x_max_schedule = [0.8, 0.8, 0, 0]
+        ang_vel_yaw_schedule = [1.0, 1.0, 0, 0]
+        non_omni_pos_y_schedule = [1.2, 1.2, 0, 0]
+        ang_vel_yaw_clip = 0.5
+        lin_vel_x_clip = 0.2
+
+    class asset():
+        file = "{LEGGED_GYM_ROOT_DIR}/resources/robots/b2z1/urdf/b2z1.urdf"
+        base_name = "base_link"
+        gripper_name = "gripper_link"
+        arm_waist_name = "joint1"
+        hip_joint_names = ["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"]
+        policy_leg_joint_names = [
+            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+        ]
+        policy_foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+        penalize_contacts_on = ["thigh", "base_link", "calf"]
+        mount_urdf_generator = "b2z1"
+        
     def __post_init__(self):
         super().__post_init__()
 

@@ -154,12 +154,16 @@ cfg.robot.spawn.asset_path = args.robot_urdf_path
 cfg.scene.num_envs = args.num_envs
 
 env = ManipLocoIsaacLab(cfg)
+env.commands[:] = 0.0
+env.commands[:, 0] = args.cmd_vx
+env.commands[:, 2] = args.cmd_yaw
 obs_out, _ = env.reset()
 env.commands[:] = 0.0
 env.commands[:, 0] = args.cmd_vx
 env.commands[:, 2] = args.cmd_yaw
 # obs = unwrap_obs(obs_out)
-obs = unwrap_obs(env.get_observations())
+# obs = unwrap_obs(env.get_observations())
+obs = unwrap_obs(obs_out)
 
 print("joint_names:", env.robot.data.joint_names)
 print("body_names:", env.robot.data.body_names)
@@ -190,9 +194,9 @@ while simulation_app.is_running():
         env.commands[:, 0] = args.cmd_vx
         env.commands[:, 2] = args.cmd_yaw
 
-        # Important: recompute obs after setting command, like old debug path.
-        obs_out = env.get_observations()
-        obs = unwrap_obs(obs_out)
+        # # Important: recompute obs after setting command, like old debug path.
+        # obs_out = env.get_observations()
+        # obs = unwrap_obs(obs_out)
 
         actions_raw = policy(obs.detach(), hist_encoding=True)
 
@@ -205,7 +209,7 @@ while simulation_app.is_running():
             debug_frames.append(collect_debug_frame(env, obs, actions_raw, actions_to_env, step))
 
         obs_out, rew, terminated, truncated, info = env.step(actions_to_env.detach())
-        # obs = unwrap_obs(obs_out)
+        obs = unwrap_obs(obs_out)
 
         if step % args.print_every == 0:
             print(
