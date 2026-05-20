@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+import json
 import sys
 from pathlib import Path
 import torch
@@ -15,7 +16,13 @@ for p in [str(LOW_LEVEL_ROOT), str(RSL_RL_ROOT)]:
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--robot_urdf_path", type=str, required=True)
+parser.add_argument("--robot_urdf_path", type=str, default="", help="Explicit URDF path. If empty, auto-generate from mount/ablation args.")
+parser.add_argument("--base_robot", type=str, default="b2z1", choices=["b1z1", "b2z1"])
+parser.add_argument("--run_metadata_path", type=str, default="", help="Path to run_metadata.json (auto-detected from ckpt dir if empty).")
+parser.add_argument("--mount_deg", type=float, default=0.0)
+parser.add_argument("--mount_xyz", type=float, nargs=3, default=None)
+parser.add_argument("--robot_ablation", type=str, default="")
+parser.add_argument("--leg_collision_scale", type=float, default=1.0)
 parser.add_argument("--ckpt_path", type=str, required=True)
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--teleop_mode", action="store_true")
@@ -35,12 +42,78 @@ from legged_gym.envs.manip_loco.b2z1_isaaclab_config import B2Z1IsaacLabCfg
 from legged_gym.envs.manip_loco.manip_loco_isaaclab import ManipLocoIsaacLab
 from rsl_rl.modules.actor_critic import ActorCritic
 
+from legged_gym.utils.b1z1_mount import ensure_mount_urdf, MOUNT_URDF_SPECS
+from legged_gym.utils.robot_ablation import ensure_cross_robot_ablation_urdf
+
+def _load_checkpoint_features(args) -> dict:
+    metadata_path = Path(args.run_metadata_path) if args.run_metadata_path else Path(args.ckpt_path).resolve().parent / "run_metadata.json"
+    if not metadata_path.exists():
+        print(f"[urdf] run metadata not found: {metadata_path}; use CLI args/defaults.")
+        return {}
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[urdf] failed to parse run metadata {metadata_path}: {exc}; use CLI args/defaults.")
+        return {}
+    features = metadata.get("checkpoint_features", {})
+    print(f"[urdf] loaded checkpoint_features from: {metadata_path}")
+    return features if isinstance(features, dict) else {}
+
+
+def resolve_robot_urdf_path(args) -> str:
+    if args.robot_urdf_path:
+        return args.robot_urdf_path
+
+    root_dir = str(LOW_LEVEL_ROOT)
+    features = _load_checkpoint_features(args)
+
+    mount_deg = float(features.get("mount_deg", args.mount_deg))
+    mount_xyz = args.mount_xyz
+    if mount_xyz is None:
+        if all(k in features for k in ("mount_x", "mount_y", "mount_z")):
+            mount_xyz = [features["mount_x"], features["mount_y"], features["mount_z"]]
+        else:
+            mount_xyz = MOUNT_URDF_SPECS[args.base_robot]["default_xyz"]
+
+    robot_ablation = args.robot_ablation.strip()
+    if not robot_ablation and "robot_ablation" in features:
+        robot_ablation = str(features.get("robot_ablation") or "")
+    robot_ablation = robot_ablation.strip().lower()
+    # Match legacy semantics: "none" means no ablation.
+    if robot_ablation in ("", "none"):
+        robot_ablation = None
+
+    leg_collision_scale = float(features.get("leg_collision_scale", args.leg_collision_scale))
+
+    need_ablation = robot_ablation is not None or leg_collision_scale != 1.0
+    if need_ablation:
+        urdf_rel = ensure_cross_robot_ablation_urdf(
+            root_dir=root_dir,
+            base_robot=args.base_robot,
+            robot_ablation=robot_ablation,
+            mount_deg=mount_deg,
+            mount_xyz=mount_xyz,
+            leg_collision_scale=leg_collision_scale,
+        )
+    else:
+        urdf_rel = ensure_mount_urdf(
+            root_dir=root_dir,
+            generator_name=args.base_robot,
+            mount_deg=mount_deg,
+            mount_xyz=mount_xyz,
+        )
+
+    urdf_path = str((LOW_LEVEL_ROOT / urdf_rel).resolve())
+    print(f"[urdf] auto-generated: {urdf_path}")
+    return urdf_path
+
 # Isaac Sim native keyboard subscription (viewer-focused input).
 _keyboard_sub = None
 
 cfg = B2Z1IsaacLabCfg()
-cfg.robot_urdf_path = args.robot_urdf_path
-cfg.robot.spawn.asset_path = args.robot_urdf_path
+resolved_urdf_path = resolve_robot_urdf_path(args)
+cfg.robot_urdf_path = resolved_urdf_path
+cfg.robot.spawn.asset_path = resolved_urdf_path
 cfg.scene.num_envs = args.num_envs
 cfg.env.teleop_mode = args.teleop_mode
 

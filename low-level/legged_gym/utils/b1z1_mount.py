@@ -13,7 +13,7 @@ MOUNT_URDF_SPECS = {
         "default_xyz": ["0.3", "0", "0.09"],
     },
     "b2z1": {
-        "source_urdf_rel_path": os.path.join("resources", "robots", "b2z1", "urdf", "b2z1.urdf"),
+        "source_urdf_rel_path": os.path.join("resources", "robots", "b2z1", "urdf", "b2z1_isaacsim_mesh_axis_fixed.urdf"),
         "generated_urdf_dir_rel_path": os.path.join("resources", "robots", "b2z1", "urdf", "generated"),
         "generated_filename_prefix": "b2z1_mount",
         "mount_joint_name": "z1_mount_joint",
