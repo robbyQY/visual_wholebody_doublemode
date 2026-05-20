@@ -662,7 +662,37 @@ class LeggedRobotIsaacLab(DirectRLEnv):
     def _get_observations(self):
         self._update_policy_aux_obs()
 
-        ee_goal_local_cart = self.curr_ee_goal_cart
+        ee_goal_obs_mode = getattr(self.cfg, "ee_goal_obs_mode", None)
+        if ee_goal_obs_mode is None and hasattr(self.cfg, "env"):
+            ee_goal_obs_mode = getattr(self.cfg.env, "ee_goal_obs_mode", "command")
+        if ee_goal_obs_mode is None:
+            ee_goal_obs_mode = "command"
+
+        if ee_goal_obs_mode == "command":
+            ee_goal_local_cart = self.curr_ee_goal_cart
+        elif ee_goal_obs_mode == "arm_base_target":
+            arm_base_name = None
+            if hasattr(self.cfg, "asset"):
+                arm_base_name = getattr(self.cfg.asset, "arm_waist_name", None)
+            if arm_base_name is None:
+                arm_base_name = "joint1"
+
+            if (
+                hasattr(self, "body_names_to_idx")
+                and arm_base_name in self.body_names_to_idx
+                and hasattr(self.robot.data, "body_state_w")
+                and hasattr(self, "curr_ee_goal_cart_world")
+            ):
+                arm_base_idx = self.body_names_to_idx[arm_base_name]
+                arm_base_pos = self.robot.data.body_state_w[:, arm_base_idx, :3]
+                ee_goal_local_cart = quat_rotate_inverse(
+                    self.base_quat,
+                    self.curr_ee_goal_cart_world - arm_base_pos,
+                )
+            else:
+                ee_goal_local_cart = self.curr_ee_goal_cart
+        else:
+            raise ValueError(f"Unsupported ee_goal_obs_mode: {ee_goal_obs_mode}")
 
         obs_body_orientation = self._get_body_orientation()
         # dim 2
