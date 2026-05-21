@@ -14,12 +14,12 @@ MOUNT_DEG="0"
 ROBOT_ABLATION=""         # 例如: "legs" / "trunk" / "arm" / "legs+inertial"
 LEG_COLLISION_SCALE="1.0" # 例如: "0.9"
 
-# CKPT_PATH="/home/leakycauldron/Downloads/ckpt/调权重_robotlab_等高系_2/model_25000.pt"
-CKPT_PATH="/home/leakycauldron/Downloads/ckpt/测试全向_robotlab_等高系_左侧机械臂_2/model_19400.pt"
+CKPT_PATH="/home/leakycauldron/Downloads/ckpt/调权重_robotlab_等高系_2/model_25000.pt"
+# CKPT_PATH="/home/leakycauldron/Downloads/ckpt/测试全向_robotlab_等高系_左侧机械臂_2/model_19400.pt"
 cd "${SCRIPT_DIR}"
 
 CMD=(
-  /home/leakycauldron/IsaacLab/isaaclab.sh -p manip_loco_interface_isaaclab.py
+  /home/leakycauldron/IsaacLab/isaaclab.sh -p manip_loco_interface.py
   --ckpt_path "${CKPT_PATH}"
   --num_envs 1
   --teleop_mode

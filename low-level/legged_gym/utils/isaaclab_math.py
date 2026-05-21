@@ -67,7 +67,7 @@ def euler_from_quat(q: torch.Tensor):
 
 def orientation_error(desired: torch.Tensor, current: torch.Tensor) -> torch.Tensor:
     q_r = quat_mul(desired, quat_conjugate(current))
-    return q_r[..., 1:4] * torch.sign(q_r[..., 0:1]) * 2.0
+    return q_r[..., 1:4] * torch.sign(q_r[..., 0:1])
 
 
 def get_axis_params(value: float, axis_idx: int):

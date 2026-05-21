@@ -38,8 +38,8 @@ import carb
 import carb.input
 import omni.appwindow
 
-from legged_gym.envs.manip_loco.b2z1_isaaclab_config import B2Z1IsaacLabCfg
-from legged_gym.envs.manip_loco.manip_loco_isaaclab import ManipLocoIsaacLab
+from legged_gym.envs.manip_loco.b2z1_config import B2Z1IsaacLabCfg
+from legged_gym.envs.manip_loco.manip_loco import ManipLocoIsaacLab
 from rsl_rl.modules.actor_critic import ActorCritic
 
 from legged_gym.utils.b1z1_mount import ensure_mount_urdf, MOUNT_URDF_SPECS
@@ -255,10 +255,9 @@ while simulation_app.is_running():
             vel = env.robot.data.root_lin_vel_w[0].detach().cpu().tolist()
             print(
                 f"[sim={sim_time:.2f}s wall_dt={wall_dt:.2f}s sim_dt={sim_dt:.2f}s RTF={rtf:.3f}] "
-                f"step={step} cmd={env.commands[0,:3].detach().cpu().tolist()} "
-                f"vel={vel}"
+                f"step={step} cmd={env.commands[0,:3].detach().cpu().tolist()} vel={vel} "
+                f"arm_mode={env.teleop_arm_control_mode} ee_goal={env.curr_ee_goal_cart[0].detach().cpu().tolist()}"
             )
-
             last_wall = now
             last_sim = sim_time
 
