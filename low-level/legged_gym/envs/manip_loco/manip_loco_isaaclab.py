@@ -281,23 +281,6 @@ class ManipLocoIsaacLab(LeggedRobotIsaacLab):
             except Exception:
                 self.ee_j_eef = None
 
-        if int(getattr(self, "global_steps", 0)) % 20 == 0:
-            print("[JAC DEBUG] jac full shape:", tuple(jac.shape))
-            print("[JAC DEBUG] gripper_idx body_state:", int(self.gripper_idx))
-            print("[JAC DEBUG] body_names:", self.body_names)
-
-            for row in [self.gripper_idx - 2, self.gripper_idx - 1, self.gripper_idx, self.gripper_idx + 1]:
-                if row < 0 or row >= jac.shape[1]:
-                    continue
-                J = jac[:, row, :6, self.arm_joint_ids]
-                col_norm = torch.norm(J[0], dim=0)
-                row_norm = torch.norm(J[0], dim=1)
-                print(
-                    f"[JAC DEBUG] row={row} "
-                    f"col_norm={col_norm.detach().cpu().tolist()} "
-                    f"row_norm={row_norm.detach().cpu().tolist()}"
-                )
-
 
     @property
     def base_pos(self):
@@ -508,7 +491,6 @@ class ManipLocoIsaacLab(LeggedRobotIsaacLab):
         if hasattr(self, "gripper_pos_targets"):
             pos_targets[:, self.gripper_joint_ids] = self.gripper_pos_targets
 
-        debug_enabled = bool(getattr(self, "teleop_debug", False)) and (int(getattr(self, "global_steps", 0)) % 20 == 0)
         arm_mode_used = "fallback"
         ik_delta_norm = None
         dpos_norm = None
@@ -531,41 +513,6 @@ class ManipLocoIsaacLab(LeggedRobotIsaacLab):
             arm_mode_used = "fallback_target_pos"
             pos_targets[:, self.arm_joint_ids] = self.target_pos[:, self.arm_joint_ids]
             pos_targets[:, self.gripper_joint_ids] = self.target_pos[:, self.gripper_joint_ids]
-
-        if debug_enabled:
-            print("[IK DEBUG] ee_pos", self.ee_pos[0].detach().cpu().tolist())
-            print("[IK DEBUG] curr_ee_goal_cart", self.curr_ee_goal_cart[0].detach().cpu().tolist())
-            print("[IK DEBUG] curr_ee_goal_cart_world", self.curr_ee_goal_cart_world[0].detach().cpu().tolist())
-            print("[IK DEBUG] dpos", (self.curr_ee_goal_cart_world - self.ee_pos)[0].detach().cpu().tolist())
-            print("[IK DEBUG] dpos_norm", torch.norm(self.curr_ee_goal_cart_world - self.ee_pos, dim=-1)[0].item())
-            print("[IK DEBUG] ee_orn", self.ee_orn[0].detach().cpu().tolist())
-            print("[IK DEBUG] ee_goal_orn_quat", self.ee_goal_orn_quat[0].detach().cpu().tolist())
-            print("[IK DEBUG] drot", orientation_error(
-                self.ee_goal_orn_quat,
-                self.ee_orn / torch.norm(self.ee_orn, dim=-1, keepdim=True).clamp_min(1e-8)
-            )[0].detach().cpu().tolist())
-
-            arm_now = self.dof_pos[0, self.arm_joint_ids].detach().cpu().tolist()
-            arm_tgt = pos_targets[0, self.arm_joint_ids].detach().cpu().tolist()
-            jac_shape = None if getattr(self, "ee_j_eef", None) is None else tuple(self.ee_j_eef.shape)
-            fallback_reason = {
-                "has_ee_pos": hasattr(self, "ee_pos"),
-                "has_goal_world": hasattr(self, "curr_ee_goal_cart_world"),
-                "has_jacobian": getattr(self, "ee_j_eef", None) is not None,
-            }
-            print(
-                f"[teleop][debug] step={int(getattr(self, 'global_steps', 0))} "
-                f"mode={arm_mode_used} teleop_mode={self.teleop_mode} teleop_arm_mode={self.teleop_arm_control_mode} "
-                f"jacobian_shape={jac_shape}"
-            )
-            if arm_mode_used == "fallback_target_pos":
-                print(f"[teleop][debug] fallback_reason={fallback_reason}")
-            print(f"[teleop][debug] arm_now={arm_now}")
-            print(f"[teleop][debug] arm_tgt={arm_tgt}")
-            if dpos_norm is not None:
-                print(f"[teleop][debug] dpos_norm={float(dpos_norm[0].detach().cpu()):.6f}")
-            if ik_delta_norm is not None:
-                print(f"[teleop][debug] ik_delta_norm={float(ik_delta_norm[0].detach().cpu()):.6f}")
 
         self.robot.set_joint_position_target(pos_targets)
         

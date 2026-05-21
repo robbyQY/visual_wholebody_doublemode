@@ -116,6 +116,7 @@ cfg.robot_urdf_path = resolved_urdf_path
 cfg.robot.spawn.asset_path = resolved_urdf_path
 cfg.scene.num_envs = args.num_envs
 cfg.env.teleop_mode = args.teleop_mode
+cfg.sim.render_interval = 4
 
 env = ManipLocoIsaacLab(cfg)
 obs_out, _ = env.reset()
@@ -231,14 +232,36 @@ def _install_isaacsim_keyboard():
 if args.teleop_mode:
     _install_isaacsim_keyboard()
 
+import time
 step = 0
+wall_t0 = time.perf_counter()
+last_wall = wall_t0
+last_sim = 0.0
+
 while simulation_app.is_running():
     with torch.inference_mode():
         actions = policy(obs.detach(), hist_encoding=True)
         obs_out, *_ = env.step(actions.detach())
         obs = obs_out["policy"] if isinstance(obs_out, dict) else obs_out
-        if step % 20 == 0:
-            print(f"[step={step}] cmd={env.commands[0,:3].detach().cpu().tolist()} arm_mode={env.teleop_arm_control_mode} ee={env.curr_ee_goal_cart[0].detach().cpu().tolist()}")
+
+        sim_time = (step + 1) * env.dt
+
+        if step % 50 == 0 and step > 0:
+            now = time.perf_counter()
+            wall_dt = now - last_wall
+            sim_dt = sim_time - last_sim
+            rtf = sim_dt / wall_dt if wall_dt > 0 else 0.0
+
+            vel = env.robot.data.root_lin_vel_w[0].detach().cpu().tolist()
+            print(
+                f"[sim={sim_time:.2f}s wall_dt={wall_dt:.2f}s sim_dt={sim_dt:.2f}s RTF={rtf:.3f}] "
+                f"step={step} cmd={env.commands[0,:3].detach().cpu().tolist()} "
+                f"vel={vel}"
+            )
+
+            last_wall = now
+            last_sim = sim_time
+
         step += 1
 
 if _keyboard_sub is not None:

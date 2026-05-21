@@ -33,7 +33,7 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
         self.num_actions = int(cfg.action_space)
         self.num_obs = int(cfg.observation_space)
-        print("self.cfg.decimationnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:", self.cfg.decimation)
+        print("self.cfg.decimation:", self.cfg.decimation)
         print("self.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dtself.cfg.sim.dt: ", self.cfg.sim.dt)
         self.dt = self.cfg.sim.dt * self.cfg.decimation
         # self.dt = self.cfg.sim.dt * 4
@@ -338,58 +338,9 @@ class LeggedRobotIsaacLab(DirectRLEnv):
 
     @property
     def contact_forces(self):
-        return self.contact_sensor.data.net_forces_w   
-
-    def _debug_enabled(self) -> bool:
-        """Print full obs/action debug only for the first few env steps."""
-        return int(getattr(self, "global_steps", 0)) < 20
-
-    def _debug_print_tensor(self, name: str, x: torch.Tensor | None, max_full_elems: int = 300):
-        """Print tensor shape, stats, and full env0 value when small enough."""
-        if x is None:
-            print(f"[NEW DEBUG] {name}: None")
-            return
-
-        xd = x.detach()
-        shape = tuple(xd.shape)
-
-        if xd.numel() == 0:
-            print(f"[NEW DEBUG] {name}: shape={shape}, numel=0")
-            return
-
-        xf = xd.float().reshape(-1)
-        x_min = float(xf.min().cpu())
-        x_max = float(xf.max().cpu())
-        x_mean = float(xf.mean().cpu())
-
-        print(
-            f"[NEW DEBUG] {name}: "
-            f"shape={shape}, numel={xd.numel()}, "
-            f"min={x_min:+.6f}, max={x_max:+.6f}, mean={x_mean:+.6f}"
-        )
-
-        if xd.ndim >= 2:
-            env0 = xd[0].reshape(-1)
-        else:
-            env0 = xd.reshape(-1)
-
-        if env0.numel() <= max_full_elems:
-            print(f"[NEW DEBUG] {name}[0] = {env0.cpu().tolist()}")
-        else:
-            print(
-                f"[NEW DEBUG] {name}[0][:40] = {env0[:40].cpu().tolist()} "
-                f"... total_dim={env0.numel()}"
-            )
+        return self.contact_sensor.data.net_forces_w
 
     def _pre_physics_step(self, actions: torch.Tensor):
-        self.global_steps += 1    
-        debug_this_step = self._debug_enabled()
-
-        if debug_this_step:
-            print("\n" + "#" * 120)
-            print(f"[NEW ACTION DEBUG BEGIN] global_steps={int(self.global_steps)}")
-            print("#" * 120)
-            self._debug_print_tensor("actions_input_from_policy_raw_policy_order", actions)
 
         if actions.shape[-1] != self.num_actions:
             raise RuntimeError(f"Expected action dim {self.num_actions}, got {actions.shape[-1]}")
@@ -404,17 +355,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         actions_before_clip = actions.clone()
         actions = torch.clip(actions, -clip, clip).to(self.device)
 
-        if debug_this_step:
-            print(f"[NEW DEBUG] cfg.control.clip_actions = {clip}")
-            self._debug_print_tensor("actions_before_arm_zero_policy_order", actions_before_arm_zero)
-            self._debug_print_tensor("actions_after_arm_zero_policy_order", actions_before_clip)
-            self._debug_print_tensor("actions_policy_order_after_clip", actions)
-            self._debug_print_tensor("actions_leg12_after_clip_policy_order", actions[:, :12])
-            self._debug_print_tensor("actions_arm6_after_clip_policy_order", actions[:, 12:])
-
-        # Old ManipLoco action delay buffer.
-        action_history_before = self.action_history_buf.clone() if debug_this_step else None
-
         self.action_history_buf = torch.cat(
             [
                 self.action_history_buf[:, 1:],
@@ -422,13 +362,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             ],
             dim=1,
         )
-
-        if debug_this_step:
-            self._debug_print_tensor("action_history_buf_before_update", action_history_before)
-            self._debug_print_tensor("action_history_buf_after_update", self.action_history_buf)
-            self._debug_print_tensor("action_history_latest", self.action_history_buf[:, -1])
-            if self.action_history_buf.shape[1] >= 2:
-                self._debug_print_tensor("action_history_previous", self.action_history_buf[:, -2])
 
         mode = getattr(self, "action_delay_mode", "auto")
 
@@ -444,36 +377,17 @@ class LeggedRobotIsaacLab(DirectRLEnv):
                 effective_actions = self.action_history_buf[:, -2]
 
         self.actions = effective_actions.clone()
-
-        # if debug_this_step:
-        #     print(f"[NEW DEBUG] action_delay_mode = {mode}")
-        #     self._debug_print_tensor("actions_final_after_delay_used_for_torque", self.actions)
-
-        # # self.torques = self._compute_torques(self.actions)
-
-        # if debug_this_step:
-        #     self._debug_print_tensor("torques_after_compute_torques_sim_order_19", self.torques)
-        #     if hasattr(self, "target_pos"):
-        #         self._debug_print_tensor("target_pos_after_compute_torques_sim_order_19", self.target_pos)
-        #     print("#" * 120)
-        #     print(f"[NEW ACTION DEBUG END] global_steps={int(self.global_steps)}")
-        #     print("#" * 120 + "\n")
+        self.global_steps += 1
 
     def _apply_action(self):
         # Full sim-order joint position target.
         # Shape: [num_envs, num_dofs].
         # It is generated in _compute_torques(actions).
-        debug_this_step = self._debug_enabled()
 
         self.torques = self._compute_torques(self.actions)
         # Optional effort target. For old ManipLoco-like behavior,
         # arm/gripper torque is zeroed in _compute_torques().
         self.robot.set_joint_effort_target(self.torques)
-                
-        if debug_this_step:
-            print("\n[NEW APPLY ACTION DEBUG]")
-            self._debug_print_tensor("target_pos_sent_to_isaaclab_sim_order_19", self.target_pos)
-            self._debug_print_tensor("torques_sent_to_isaaclab_sim_order_19", self.torques)
                     
         # arm/gripper: only position target
         pos_targets = self.dof_pos.clone()
@@ -493,7 +407,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             [num_envs, 19], IsaacLab sim joint order:
             12 legs + 6 arm + jointGripper.
         """
-        debug_this_step = self._debug_enabled()
 
         if actions.shape[-1] != self.num_actions:
             raise RuntimeError(f"Expected action dim {self.num_actions}, got {actions.shape[-1]}")
@@ -539,50 +452,7 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         # Constant clamp for bring-up.
         torques = torch.clamp(torques_after_arm_zero, -600.0, 600.0)
 
-        if debug_this_step:
-            print("\n[NEW TORQUE DEBUG]")
-            print(f"[NEW DEBUG] control_type = {self.cfg.control.control_type}")
-            self._debug_print_tensor("actions_input_to_compute_torques_policy_order_18", actions)
-            self._debug_print_tensor("action_scale_tensor_18", self.action_scale_tensor)
-            self._debug_print_tensor("scaled_actions_policy_order_18", scaled)
-
-            print("[NEW DEBUG] joint_ids policy->sim =", joint_ids.detach().cpu().tolist())
-            print("[NEW DEBUG] policy_joint_names =", self.cfg.policy_joint_names)
-
-            self._debug_print_tensor("default_dof_pos_sim_order_19", self.default_dof_pos)
-            self._debug_print_tensor("dof_pos_current_sim_order_19", self.dof_pos)
-            self._debug_print_tensor("dof_vel_current_sim_order_19", self.dof_vel)
-            self._debug_print_tensor("target_pos_sim_order_19", target_pos)
-            self._debug_print_tensor("target_offset_sim_order_19", target_pos - self.default_dof_pos)
-
-            self._debug_print_tensor("p_gains_sim_order_19", self.p_gains)
-            self._debug_print_tensor("d_gains_sim_order_19", self.d_gains)
-            self._debug_print_tensor("torques_unclipped_sim_order_19", torques_unclipped)
-            self._debug_print_tensor("torques_after_arm_gripper_zero_sim_order_19", torques_after_arm_zero)
-            self._debug_print_tensor("torques_final_clipped_sim_order_19", torques)
-
-        return torques
-
-    # def _compute_torques(self, actions: torch.Tensor) -> torch.Tensor:
-    #     scaled = actions * self.action_scale_tensor.unsqueeze(0)
-
-    #     target_pos = self.default_dof_pos.clone()
-    #     target_pos[:, self.policy_joint_ids] = (
-    #         self.default_dof_pos[:, self.policy_joint_ids]
-    #         + scaled[:, : self.policy_joint_ids.numel()]
-    #     )
-
-    #     self.target_pos = target_pos
-
-    #     if not hasattr(self, "_target_debug_counter"):
-    #         self._target_debug_counter = 0
-    #     self._target_debug_counter += 1
-
-    #     if self._target_debug_counter % 50 == 0:
-    #         offsets = (self.target_pos - self.default_dof_pos)[0, self.policy_joint_ids[:12]]
-    #         print("[target offset rad leg]", offsets.detach().cpu().tolist())
-
-    #     return torch.zeros(self.num_envs, self.num_dofs, device=self.device)    
+        return torques 
 
     def _get_body_orientation(self, return_yaw: bool = False):
         r, p, y = euler_from_quat(self.base_quat)
@@ -592,25 +462,7 @@ class LeggedRobotIsaacLab(DirectRLEnv):
     def _update_policy_aux_obs(self):
         # # Foot contact approximation from ContactSensor.
         # # If contact force body order is uncertain, use robot body feet_indices as first approximation.
-        # try:
-        #     forces = self.contact_forces[:, self.feet_indices, :]
-        #     self.foot_contacts_from_sensor = torch.norm(forces, dim=-1) > 1.5
-        # except Exception:
-        #     self.foot_contacts_from_sensor = torch.zeros(
-        #         self.num_envs, 4, dtype=torch.bool, device=self.device
-        #     )
 
-        # # Gait clock. For first policy test, fixed frequency 2.0 Hz is enough.
-        # # dt is env step dt, not physics dt.
-        # freq = 2.0
-        # self.gait_indices = torch.remainder(self.gait_indices + self.step_dt * freq, 1.0)
-        
-        # 先强制 foot contact 和 old debug 一致
-        # self.foot_contacts_from_sensor[:] = torch.tensor(
-        #     [False, False, True, False],
-        #     device=self.device,
-        #     dtype=torch.bool,
-        # ).unsqueeze(0)
         net_forces = self.contact_sensor.data.net_forces_w
 
         if not hasattr(self, "_printed_contact_shape"):
@@ -633,32 +485,10 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             forces = torch.zeros(self.num_envs, 4, 3, device=self.device)
 
         force_norm = torch.norm(forces, dim=-1)
-        self.foot_contacts_from_sensor = force_norm > 1.5
+        self.foot_contacts_from_sensor = force_norm > 1.5             
 
-        if int(self.global_steps) < 20:
-            print("[feet contact forces]", forces[0].detach().cpu().tolist())
-            print("[feet contact norm]", force_norm[0].detach().cpu().tolist())
-            print("[foot contacts]", self.foot_contacts_from_sensor[0].detach().cpu().tolist())              
-
-        # # 先固定 gait / clock，不要推进
-        # self.gait_indices[:] = 0.0
-        # self.clock_inputs[:] = torch.tensor(
-        #     [-8.742277657347586e-08, 0.0, 0.0, -8.742277657347586e-08],
-        #     device=self.device,
-        # ).unsqueeze(0)
         self._step_contact_targets()
         
-        # phase = 2.0 * torch.pi * self.gait_indices
-        # self.clock_inputs = torch.stack(
-        #     [
-        #         torch.sin(phase),
-        #         torch.cos(phase),
-        #         torch.sin(phase + torch.pi),
-        #         torch.cos(phase + torch.pi),
-        #     ],
-        #     dim=-1,
-        # )
-
     def _get_observations(self):
         self._update_policy_aux_obs()
 
@@ -759,45 +589,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
                 dim=-1,
             )
 
-        # -----------------------------
-        # Full obs debug, first 5 steps
-        # -----------------------------
-        if self._debug_enabled():
-            print("\n" + "=" * 120)
-            print(f"[NEW OBS DEBUG] global_steps={int(self.global_steps)}")
-            print("=" * 120)
-
-            obs_start = 0
-            for name, term in obs_terms_named:
-                dim = term.shape[-1]
-                obs_end = obs_start + dim
-
-                print(f"\n[NEW OBS TERM] {name}: obs_slice=[{obs_start}:{obs_end}], dim={dim}")
-                self._debug_print_tensor(name, term)
-
-                obs_start = obs_end
-
-            print(f"\n[NEW OBS CAT] proprio obs_buf dim = {obs_buf.shape[-1]}")
-            self._debug_print_tensor("obs_buf_proprio_72", obs_buf)
-
-            self._debug_print_tensor("raw_root_states", self.root_states)
-            self._debug_print_tensor("root_pos_w", self.robot.data.root_pos_w)
-            self._debug_print_tensor("root_quat_w", self.robot.data.root_quat_w)
-            self._debug_print_tensor("root_lin_vel_w", self.robot.data.root_lin_vel_w)
-            self._debug_print_tensor("root_ang_vel_w", self.robot.data.root_ang_vel_w)
-            self._debug_print_tensor("base_lin_vel_b", self.base_lin_vel)
-            self._debug_print_tensor("base_ang_vel_b", self.base_ang_vel)
-            self._debug_print_tensor("projected_gravity_b", self.projected_gravity)
-            self._debug_print_tensor("dof_pos_sim_order_19", self.dof_pos)
-            self._debug_print_tensor("dof_vel_sim_order_19", self.dof_vel)
-            self._debug_print_tensor("default_dof_pos_sim_order_19", self.default_dof_pos)
-
-            print("[NEW DEBUG] dof_names sim order =", self.dof_names)
-            print("[NEW DEBUG] policy_joint_names =", self.cfg.policy_joint_names)
-            print("[NEW DEBUG] policy_joint_ids =", self.policy_joint_ids.detach().cpu().tolist())
-            print("[NEW DEBUG] policy_all_joint_names =", self.policy_all_joint_names)
-            print("[NEW DEBUG] policy_all_joint_ids =", self.policy_all_joint_ids.detach().cpu().tolist())
-
         # Sanity: checkpoint expects proprio dim 72.
         if obs_buf.shape[-1] != self.num_proprio:
             raise RuntimeError(
@@ -818,19 +609,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         if priv_buf.shape[-1] != self.num_priv:
             raise RuntimeError(f"Expected priv dim {self.num_priv}, got {priv_buf.shape[-1]}")
 
-        if self._debug_enabled():
-            print("\n[NEW PRIV DEBUG]")
-            self._debug_print_tensor("mass_params_tensor_4", self.mass_params_tensor)
-            self._debug_print_tensor("friction_coeffs_tensor_1", self.friction_coeffs_tensor)
-            self._debug_print_tensor("motor_strength_minus_1_leg_12", self.motor_strength[:, :12] - 1)
-            self._debug_print_tensor("priv_pad_1", torch.zeros(self.num_envs, 1, device=self.device))
-            self._debug_print_tensor("priv_buf_18", priv_buf)
-            self._debug_print_tensor("obs_history_buf_before_update", self.obs_history_buf)
-            self._debug_print_tensor(
-                "obs_history_flat_before_update",
-                self.obs_history_buf.reshape(self.num_envs, -1),
-            )
-
         self.obs_buf = torch.cat(
             [
                 obs_buf,
@@ -844,11 +622,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             raise RuntimeError(
                 f"Expected obs dim {self.num_obs}, got {self.obs_buf.shape[-1]}"
             )
-
-        if self._debug_enabled():
-            print("\n[NEW FINAL OBS BEFORE HISTORY UPDATE]")
-            self._debug_print_tensor("self.obs_buf_before_clip_input_to_policy", self.obs_buf)
-            print(f"[NEW FINAL OBS DIM] self.obs_buf.shape = {tuple(self.obs_buf.shape)}")
 
         # Update history after constructing obs, matching old code ordering.
         self.obs_history_buf = torch.where(
@@ -868,12 +641,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
             -self.cfg.control.clip_observations,
             self.cfg.control.clip_observations,
         )
-
-        if self._debug_enabled():
-            print("\n[NEW FINAL OBS AFTER CLIP]")
-            print(f"[NEW DEBUG] clip_observations = {self.cfg.control.clip_observations}")
-            self._debug_print_tensor("self.obs_buf_after_clip_return_policy", self.obs_buf)
-            print("=" * 120 + "\n")
 
         return {"policy": self.obs_buf}
 
@@ -995,7 +762,6 @@ class LeggedRobotIsaacLab(DirectRLEnv):
         joint_vel = torch.zeros_like(joint_pos)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
         self.robot.set_joint_position_target(joint_pos, env_ids=env_ids)
-        print("hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii")
 
         root_state = self.robot.data.default_root_state[env_ids].clone()
         root_state[:, :3] += self.scene.env_origins[env_ids]
